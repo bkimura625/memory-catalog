@@ -424,6 +424,11 @@
         return !p || p.nextReview <= t;
       }).length;
     }
+    if(hasDecks(topic)){
+      var total = 0;
+      topic.decks.forEach(function(d){ total += d.facts.filter(function(f){ return f.nextReview <= t; }).length; });
+      return total;
+    }
     return topic.facts.filter(function(f){ return f.nextReview <= t; }).length;
   }
   function topicById(id){ return state.topics.find(function(t){ return t.id===id; }); }
@@ -455,8 +460,8 @@
   // ---------- MAP ENGINE ----------
   var mapEngine = { features:null, loading:false, error:null, promise:null };
   var MAP_DATA_URLS = [
-    'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_countries.geojson',
-    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson'
+    'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_0_countries.geojson',
+    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson'
   ];
   function loadMapData(){
     if(mapEngine.promise) return mapEngine.promise;
@@ -562,6 +567,7 @@
       var p = document.createElementNS(svgNS,'path');
       p.setAttribute('d', d);
       p.setAttribute('class','country');
+      p.setAttribute('vector-effect','non-scaling-stroke');
       p.setAttribute('data-name', f.properties.name);
       if(opts.getFill){ var c = opts.getFill(f); if(c) p.style.fill = c; }
       if(opts.getOpacity){ var o = opts.getOpacity(f); if(o!=null) p.style.opacity = o; }
@@ -572,7 +578,19 @@
   }
 
   function boundsForFeatures(ctx, features, padFactor){
-    var fc = { type:'FeatureCollection', features: features.length ? features : mapEngine.features };
+    var list = features && features.length ? features : mapEngine.features;
+    var compact = list;
+    if(list.length > 1){
+      var withW = list.map(function(f){
+        var b = null;
+        try{ b = ctx.pathGen.bounds(f); } catch(e){}
+        return { f:f, w: b ? (b[1][0]-b[0][0]) : 0 };
+      }).filter(function(o){ return isFinite(o.w) && o.w > 0; });
+      var threshold = ctx.w * 0.4; // wider than 40% of the whole world = transcontinental outlier (e.g. Russia)
+      var filtered = withW.filter(function(o){ return o.w < threshold; });
+      if(filtered.length){ compact = filtered.map(function(o){ return o.f; }); }
+    }
+    var fc = { type:'FeatureCollection', features: compact };
     var b = ctx.pathGen.bounds(fc); // [[x0,y0],[x1,y1]]
     var x0=b[0][0], y0=b[0][1], x1=b[1][0], y1=b[1][1];
     var w = Math.max(1, x1-x0), h = Math.max(1, y1-y0);
@@ -674,6 +692,7 @@
     applyView();
     return {
       reset: function(){ view.x=initialView.x; view.y=initialView.y; view.w=initialView.w; view.h=initialView.h; applyView(); },
+      getView: function(){ return { x:view.x, y:view.y, w:view.w, h:view.h }; },
       zoomBy: function(factor, cx, cy){
         var anchor = cx!=null ? {x:cx,y:cy} : { x: view.x+view.w/2, y: view.y+view.h/2 };
         var fx = (anchor.x-view.x)/view.w, fy = (anchor.y-view.y)/view.h;
@@ -706,6 +725,7 @@
     else if(top.view==='topic'){ renderTopic(topbar, main, top); }
     else if(top.view==='learn'){ renderLearn(topbar, main, top); }
     else if(top.view==='test'){ renderTest(topbar, main, top); }
+    else if(top.view==='deck'){ renderDeck(topbar, main, top); }
     else if(top.view==='summary'){ renderSummary(topbar, main, top); }
     else if(top.view==='mapexplore'){ renderMapExplore(topbar, main, top); }
     else if(top.view==='maprecall'){ renderMapRecall(topbar, main, top); }
@@ -726,11 +746,11 @@
       var isMap = (t.type||'facts')==='map';
       var due = dueCount(t);
       var code = (t.name.slice(0,3).toUpperCase() || 'GEN');
-      var countLabel = isMap ? (mapEngine.features ? mapEngine.features.length+' countries' : 'atlas') : (t.facts.length+' cards');
-      var countNum = isMap ? (mapEngine.features ? mapEngine.features.length : '—') : t.facts.length;
+      var cardCount = isMap ? null : factsTopicCardCount(t);
+      var countLabel = isMap ? (mapEngine.features ? mapEngine.features.length+' countries' : 'atlas') : (hasDecks(t) ? t.decks.length+' subtopics' : cardCount+' cards');
       html += '<div class="drawer" data-id="'+t.id+'" style="background:linear-gradient(180deg,'+t.color+' 0%, '+shade(t.color,-18)+' 100%)">' +
         '<div class="pull"></div>' +
-        '<div class="label"><div class="code">'+code+'-'+(isMap?'ATL':String(t.facts.length).padStart(2,'0'))+'</div><div class="name">'+esc(t.name)+'</div></div>' +
+        '<div class="label"><div class="code">'+code+'-'+(isMap?'ATL':String(cardCount).padStart(2,'0'))+'</div><div class="name">'+esc(t.name)+'</div></div>' +
         '<div class="stats"><div class="count">'+countLabel+'</div><div class="due '+(due===0?'zero':'')+'">'+(due>0? due+' due today':'all caught up')+'</div></div>' +
         '</div>';
     });
@@ -824,6 +844,7 @@
     var t = topicById(top.topicId);
     if(!t){ nav=[]; render(); return; }
     if((t.type||'facts')==='map'){ renderMapTopic(topbar, main, top, t); return; }
+    if(hasDecks(t)){ renderDeckList(topbar, main, top, t); return; }
     var due = dueCount(t);
     topbar.innerHTML =
       '<button class="back" id="btnBack">‹</button>' +
@@ -847,6 +868,7 @@
       html += '<div class="fact-row" data-id="'+f.id+'"><div class="q">'+esc(f.q)+'</div><div class="box-dots">'+dots+'</div></div>';
     });
     html += '<button class="add-fact-btn" id="btnAddFact">+ Add Card</button>';
+    html += '<button class="add-fact-btn" id="btnAddSubtopic" style="margin-top:8px;">+ Add Subtopic</button>';
     html += '</div>';
     main.innerHTML = html;
 
@@ -862,10 +884,129 @@
       push({view:'test', topicId:t.id, queue: pool.map(function(f){return f.id;}), idx:0, revealed:false, correct:0, missed:0});
     };
     document.getElementById('btnAddFact').onclick = function(){ openFactSheet(t, null); };
+    document.getElementById('btnAddSubtopic').onclick = function(){ openSubtopicSheet(t, null); };
     main.querySelectorAll('.fact-row').forEach(function(el){
       el.onclick = function(){ openFactSheet(t, el.getAttribute('data-id')); };
     });
   }
+
+  function hasDecks(t){ return !!(t.decks && t.decks.length); }
+  function deckById(t, id){ return (t.decks||[]).find(function(d){ return d.id===id; }); }
+  function factsTopicCardCount(t){
+    return hasDecks(t) ? t.decks.reduce(function(s,d){ return s+d.facts.length; }, 0) : t.facts.length;
+  }
+
+  function renderDeckList(topbar, main, top, t){
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+esc(t.name)+'</h1><div class="sub">'+t.decks.length+' subtopics</div></div>' +
+      '<button class="action" id="btnEditTopic">✎</button>';
+    document.getElementById('btnBack').onclick = pop;
+    document.getElementById('btnEditTopic').onclick = function(){ openTopicSheet(t.id); };
+
+    var html = '<div class="view"><div class="section-label"><span>Subtopics</span></div>';
+    t.decks.forEach(function(d){
+      var todayT = todayStr();
+      var due = d.facts.filter(function(f){ return f.nextReview<=todayT; }).length;
+      html += '<div class="fact-row" data-id="'+d.id+'" style="cursor:pointer;">' +
+        '<div class="q" style="font-family:var(--font-display); font-weight:600;">'+esc(d.name)+'</div>' +
+        '<div style="font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft); text-align:right; flex-shrink:0;">'+d.facts.length+' cards<br>'+(due>0? due+' due':'caught up')+'</div>' +
+        '</div>';
+    });
+    html += '<button class="add-fact-btn" id="btnAddSubtopic">+ New Subtopic</button></div>';
+    main.innerHTML = html;
+
+    document.getElementById('btnAddSubtopic').onclick = function(){ openSubtopicSheet(t, null); };
+    main.querySelectorAll('.fact-row').forEach(function(el){
+      el.onclick = function(){ push({view:'deck', topicId:t.id, deckId: el.getAttribute('data-id')}); };
+    });
+  }
+
+  function openSubtopicSheet(t, deckId){
+    var d = deckId ? deckById(t, deckId) : null;
+    var wrap = document.createElement('div');
+    wrap.className = 'overlay';
+    wrap.innerHTML =
+      '<div class="sheet">' +
+      '<h3>'+(d? 'Edit Subtopic' : 'New Subtopic')+'</h3>' +
+      '<div class="field"><label>Subtopic name</label><input id="dName" type="text" value="'+(d?esc(d.name):'')+'" placeholder="e.g. German"></div>' +
+      '<div class="sheet-actions">' +
+      (d? '<button class="delete" id="dDelete">Delete</button>' : '') +
+      '<button class="cancel" id="dCancel">Cancel</button>' +
+      '<button class="save" id="dSave">Save</button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    wrap.querySelector('#dCancel').onclick = function(){ wrap.remove(); };
+    if(d){
+      wrap.querySelector('#dDelete').onclick = function(){
+        t.decks = t.decks.filter(function(x){ return x.id!==d.id; });
+        saveData(); wrap.remove();
+        nav = nav.filter(function(n){ return n.deckId !== d.id; });
+        render();
+      };
+    }
+    wrap.querySelector('#dSave').onclick = function(){
+      var name = wrap.querySelector('#dName').value.trim();
+      if(!name) return;
+      if(d){ d.name = name; }
+      else {
+        if(!t.decks){
+          t.decks = [];
+          if(t.facts && t.facts.length){ t.decks.push({ id: uid(), name:'General', facts:t.facts }); t.facts = []; }
+        }
+        t.decks.push({ id: uid(), name:name, facts:[] });
+      }
+      saveData(); wrap.remove(); render();
+    };
+  }
+
+  function renderDeck(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    var d = deckById(t, top.deckId);
+    if(!d){ pop(); return; }
+    var due = d.facts.filter(function(f){ return f.nextReview<=todayStr(); }).length;
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+esc(d.name)+'</h1><div class="sub">'+esc(t.name)+' · '+d.facts.length+' cards</div></div>' +
+      '<button class="action" id="btnEditDeck">✎</button>';
+    document.getElementById('btnBack').onclick = pop;
+    document.getElementById('btnEditDeck').onclick = function(){ openSubtopicSheet(t, d.id); };
+
+    var html = '<div class="view">';
+    html += '<div class="mode-buttons">' +
+      '<button class="mode-btn learn" id="btnLearn"><span class="big">Learn</span><span class="small">Browse all cards</span></button>' +
+      '<button class="mode-btn test" id="btnTest"><span class="big">Test</span><span class="small">'+(due>0? due+' due today' : 'review anyway')+'</span></button>' +
+      '</div>';
+    html += '<div class="section-label"><span>Cards</span></div>';
+    if(d.facts.length===0){
+      html += '<div class="empty-note">No cards yet. Add the first fact for this subtopic.</div>';
+    }
+    d.facts.forEach(function(f){
+      var dots = '';
+      for(var i=1;i<=5;i++){ dots += '<span class="'+(i<=f.box?'filled':'')+'"></span>'; }
+      html += '<div class="fact-row" data-id="'+f.id+'"><div class="q">'+esc(f.q)+'</div><div class="box-dots">'+dots+'</div></div>';
+    });
+    html += '<button class="add-fact-btn" id="btnAddFact">+ Add Card</button></div>';
+    main.innerHTML = html;
+
+    document.getElementById('btnLearn').onclick = function(){
+      if(d.facts.length===0){ openFactSheet(d, null); return; }
+      push({view:'learn', topicId:t.id, deckId:d.id, factIndex:0});
+    };
+    document.getElementById('btnTest').onclick = function(){
+      if(d.facts.length===0){ openFactSheet(d, null); return; }
+      var pool = d.facts.filter(function(f){ return f.nextReview <= todayStr(); });
+      if(pool.length===0) pool = d.facts.slice();
+      shuffle(pool);
+      push({view:'test', topicId:t.id, deckId:d.id, queue: pool.map(function(f){return f.id;}), idx:0, revealed:false, correct:0, missed:0});
+    };
+    document.getElementById('btnAddFact').onclick = function(){ openFactSheet(d, null); };
+    main.querySelectorAll('.fact-row').forEach(function(el){
+      el.onclick = function(){ openFactSheet(d, el.getAttribute('data-id')); };
+    });
+  }
+
   function shuffle(arr){
     for(var i=arr.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var tmp=arr[i]; arr[i]=arr[j]; arr[j]=tmp; }
   }
@@ -1031,7 +1172,9 @@
     wrap.insertBefore(ctx.svg, wrap.firstChild);
     var worldBounds = boundsForFeatures(ctx, mapEngine.features, 0.03);
     var targetFeature = mapEngine.features.find(function(f){ return f.properties.name===targetName; });
-    var initView = (!isLocate && targetFeature) ? boundsForFeatures(ctx, [targetFeature], 3) : boundsForFeatures(ctx, categoryFeatures(category), 0.15);
+    var initView = top.savedView
+      ? top.savedView
+      : ((!isLocate && targetFeature) ? boundsForFeatures(ctx, [targetFeature], 3) : boundsForFeatures(ctx, categoryFeatures(category), 0.15));
 
     if(!isLocate){
       var targetPath = ctx.svg.querySelector('path[data-name="'+CSS.escape(targetName)+'"]');
@@ -1051,7 +1194,7 @@
       }
       gradeCountry(t, targetName, correct);
       replaceTop(Object.assign({}, top, {
-        revealed:true, lastCorrect:correct,
+        revealed:true, lastCorrect:correct, savedView: pz.getView(),
         correct: top.correct + (correct?1:0), missed: top.missed + (correct?0:1)
       }));
     } : null);
@@ -1065,7 +1208,7 @@
         var correct = nameMatches(val, targetName);
         gradeCountry(t, targetName, correct);
         replaceTop(Object.assign({}, top, {
-          revealed:true, lastCorrect:correct,
+          revealed:true, lastCorrect:correct, savedView: pz.getView(),
           correct: top.correct + (correct?1:0), missed: top.missed + (correct?0:1)
         }));
       };
@@ -1075,7 +1218,10 @@
     }
     if(top.revealed){
       document.getElementById('btnNext').onclick = function(){
-        replaceTop(Object.assign({}, top, { idx: top.idx+1, revealed:false, lastCorrect:undefined }));
+        replaceTop(Object.assign({}, top, {
+          idx: top.idx+1, revealed:false, lastCorrect:undefined,
+          savedView: isLocate ? pz.getView() : null
+        }));
       };
     }
   }
@@ -1116,21 +1262,24 @@
   function renderLearn(topbar, main, top){
     var t = topicById(top.topicId);
     if(!t){ nav=[]; render(); return; }
-    var f = t.facts[top.factIndex];
+    var container = top.deckId ? deckById(t, top.deckId) : t;
+    if(!container){ pop(); return; }
+    var f = container.facts[top.factIndex];
+    var label = top.deckId ? (esc(t.name)+' · '+esc(container.name)) : esc(t.name);
     topbar.innerHTML =
       '<button class="back" id="btnBack">‹</button>' +
-      '<div style="flex:1"><h1>Learn · '+esc(t.name)+'</h1><div class="sub">Browsing mode</div></div>';
+      '<div style="flex:1"><h1>Learn · '+label+'</h1><div class="sub">Browsing mode</div></div>';
     document.getElementById('btnBack').onclick = pop;
 
     var html = '<div class="view stage">';
-    html += '<div class="progress-line"><span>CARD '+(top.factIndex+1)+' OF '+t.facts.length+'</span><span>TAP CARD TO FLIP</span></div>';
+    html += '<div class="progress-line"><span>CARD '+(top.factIndex+1)+' OF '+container.facts.length+'</span><span>TAP CARD TO FLIP</span></div>';
     html += '<div class="flip-card" id="flipCard"><div class="flip-inner" id="flipInner">' +
       '<div class="face front"><div class="kicker">Prompt</div><div class="content">'+esc(f.q)+'</div><div class="hint">tap to reveal</div></div>' +
       '<div class="face back"><div class="kicker">Answer</div><div class="content">'+esc(f.a)+'</div><div class="hint">tap to flip back</div></div>' +
       '</div></div>';
     html += '<div class="learn-nav">' +
       '<button id="btnPrev" '+(top.factIndex===0?'disabled style="opacity:0.4"':'')+'>‹ Prev</button>' +
-      '<button class="primary" id="btnNext">'+(top.factIndex===t.facts.length-1?'Finish':'Next ›')+'</button>' +
+      '<button class="primary" id="btnNext">'+(top.factIndex===container.facts.length-1?'Finish':'Next ›')+'</button>' +
       '</div></div>';
     main.innerHTML = html;
 
@@ -1140,10 +1289,10 @@
       document.getElementById('flipInner').classList.toggle('flipped', flipped);
     };
     document.getElementById('btnPrev').onclick = function(){
-      if(top.factIndex>0) replaceTop({view:'learn', topicId:t.id, factIndex: top.factIndex-1});
+      if(top.factIndex>0) replaceTop(Object.assign({}, top, { factIndex: top.factIndex-1 }));
     };
     document.getElementById('btnNext').onclick = function(){
-      if(top.factIndex < t.facts.length-1) replaceTop({view:'learn', topicId:t.id, factIndex: top.factIndex+1});
+      if(top.factIndex < container.facts.length-1) replaceTop(Object.assign({}, top, { factIndex: top.factIndex+1 }));
       else pop();
     };
   }
@@ -1152,14 +1301,17 @@
   function renderTest(topbar, main, top){
     var t = topicById(top.topicId);
     if(!t){ nav=[]; render(); return; }
+    var container = top.deckId ? deckById(t, top.deckId) : t;
+    if(!container){ pop(); return; }
     if(top.idx >= top.queue.length){
-      replaceTop({view:'summary', topicId:t.id, correct:top.correct, missed:top.missed, total:top.queue.length});
+      replaceTop({view:'summary', topicId:t.id, deckId:top.deckId, correct:top.correct, missed:top.missed, total:top.queue.length});
       return;
     }
-    var f = factById(t, top.queue[top.idx]);
+    var f = container.facts.find(function(x){ return x.id===top.queue[top.idx]; });
+    var label = top.deckId ? (esc(t.name)+' · '+esc(container.name)) : esc(t.name);
     topbar.innerHTML =
       '<button class="back" id="btnBack">‹</button>' +
-      '<div style="flex:1"><h1>Test · '+esc(t.name)+'</h1><div class="sub">Self-check mode</div></div>';
+      '<div style="flex:1"><h1>Test · '+label+'</h1><div class="sub">Self-check mode</div></div>';
     document.getElementById('btnBack').onclick = pop;
 
     var html = '<div class="view stage">';
@@ -1181,11 +1333,11 @@
         replaceTop(Object.assign({}, top, {revealed:true}));
       };
     } else {
-      document.getElementById('btnGot').onclick = function(){ grade(t, f, top, true); };
-      document.getElementById('btnMiss').onclick = function(){ grade(t, f, top, false); };
+      document.getElementById('btnGot').onclick = function(){ grade(f, top, true); };
+      document.getElementById('btnMiss').onclick = function(){ grade(f, top, false); };
     }
   }
-  function grade(topic, fact, top, correct){
+  function grade(fact, top, correct){
     if(correct){
       fact.box = Math.min(5, fact.box+1);
       fact.nextReview = addDays(todayStr(), BOX_INTERVALS[fact.box-1]);
@@ -1204,7 +1356,8 @@
   // ---------- SUMMARY ----------
   function renderSummary(topbar, main, top){
     var t = topicById(top.topicId);
-    topbar.innerHTML = '<div style="flex:1"><h1>Session Complete</h1><div class="sub">'+esc(t?t.name:'')+'</div></div>';
+    var d = (t && top.deckId) ? deckById(t, top.deckId) : null;
+    topbar.innerHTML = '<div style="flex:1"><h1>Session Complete</h1><div class="sub">'+esc(d?d.name:(t?t.name:''))+'</div></div>';
     var pct = top.total>0 ? Math.round((top.correct/top.total)*100) : 0;
     var unit = (t && (t.type||'facts')==='map') ? 'countries' : 'cards';
     var html = '<div class="view summary">' +
@@ -1214,7 +1367,10 @@
       '<button id="btnDone">Back to Drawer</button>' +
       '</div>';
     main.innerHTML = html;
-    document.getElementById('btnDone').onclick = function(){ nav = [{view:'topic', topicId: top.topicId}]; render(); };
+    document.getElementById('btnDone').onclick = function(){
+      nav = top.deckId ? [{view:'topic', topicId: top.topicId}, {view:'deck', topicId: top.topicId, deckId: top.deckId}] : [{view:'topic', topicId: top.topicId}];
+      render();
+    };
   }
 
   // ---------- init ----------
