@@ -1,0 +1,1896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Memory Catalog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  :root{
+    --paper:#F1ECDC;
+    --paper-dark:#E3DCC6;
+    --card:#FBF8EF;
+    --ink:#2B2621;
+    --ink-soft:#5B5347;
+    --drawer:#2E4034;
+    --drawer-dark:#233329;
+    --stamp:#B33A3A;
+    --stamp-dark:#8F2D2D;
+    --brass:#A9812E;
+    --brass-light:#D4AF62;
+    --line: rgba(43,38,33,0.14);
+    --font-display:'Roboto Slab', serif;
+    --font-body:'Source Serif 4', serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--font-body);
+    overflow:hidden;
+    padding-top:env(safe-area-inset-top);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  #app{ position:relative; height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* header */
+  header.topbar{
+    background:var(--drawer); color:#F1ECDC;
+    padding:14px 16px 12px; display:flex; align-items:center; gap:10px;
+    flex-shrink:0; position:relative; z-index:5;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.15);
+  }
+  header.topbar .back{
+    width:36px; height:36px; border-radius:50%; border:1px solid rgba(241,236,220,0.35);
+    background:transparent; color:#F1ECDC; font-family:var(--font-mono); font-size:18px;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  header.topbar h1{
+    font-family:var(--font-display); font-weight:600; font-size:19px; margin:0;
+    letter-spacing:0.2px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  header.topbar .sub{
+    font-family:var(--font-mono); font-size:11px; color:#C8CFC5; letter-spacing:0.6px; text-transform:uppercase;
+  }
+  header.topbar .action{
+    width:36px; height:36px; border-radius:50%; background:rgba(241,236,220,0.12); border:none;
+    color:#F1ECDC; font-size:20px; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+
+  main{ flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .view{ padding:16px 16px 32px; animation:fadeIn 0.22s ease; }
+  @keyframes fadeIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+
+  /* ---- Home: card catalog cabinet ---- */
+  .cabinet-note{
+    font-family:var(--font-mono); font-size:11.5px; color:var(--ink-soft); letter-spacing:0.4px;
+    text-transform:uppercase; margin:2px 2px 14px;
+  }
+  .drawer{
+    background: linear-gradient(180deg, var(--drawer) 0%, var(--drawer-dark) 100%);
+    border-radius:10px; padding:14px 16px; margin-bottom:12px; position:relative;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.04) inset;
+    display:flex; align-items:center; gap:14px; color:#F1ECDC;
+  }
+  .drawer:active{ transform:translateY(1px); }
+  .drawer .pull{
+    width:34px; height:34px; border-radius:50%; flex-shrink:0;
+    background: radial-gradient(circle at 35% 30%, var(--brass-light), var(--brass) 70%);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4) inset, 0 1px 1px rgba(255,255,255,0.3);
+  }
+  .drawer .label{ flex:1; min-width:0; }
+  .drawer .label .code{
+    font-family:var(--font-mono); font-size:10.5px; color:var(--brass-light); letter-spacing:1px;
+  }
+  .drawer .label .name{
+    font-family:var(--font-display); font-size:17px; font-weight:600; margin-top:1px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .drawer .stats{ text-align:right; flex-shrink:0; font-family:var(--font-mono); }
+  .drawer .stats .count{ font-size:15px; font-weight:600; }
+  .drawer .stats .due{ font-size:10.5px; color:var(--brass-light); margin-top:2px; }
+  .drawer .stats .due.zero{ color:#8FA096; }
+
+  .new-drawer-btn{
+    width:100%; padding:14px; border-radius:10px; border:1.5px dashed rgba(43,38,33,0.3);
+    background:transparent; color:var(--ink-soft); font-family:var(--font-mono); font-size:13px;
+    letter-spacing:0.4px; text-transform:uppercase; margin-top:6px;
+  }
+
+  /* ---- Topic view ---- */
+  .mode-buttons{ display:flex; gap:10px; margin-bottom:18px; }
+  .mode-btn{
+    flex:1; padding:16px 10px; border-radius:10px; border:none; text-align:left;
+    font-family:var(--font-display); position:relative; overflow:hidden;
+  }
+  .mode-btn.learn{ background:var(--card); border:1.5px solid var(--line); color:var(--ink); }
+  .mode-btn.test{ background:var(--stamp); color:#FBF8EF; }
+  .mode-btn .big{ font-size:16px; font-weight:600; display:block; }
+  .mode-btn .small{ font-family:var(--font-mono); font-size:10.5px; display:block; margin-top:4px; opacity:0.8; letter-spacing:0.4px; text-transform:uppercase;}
+
+  .section-label{
+    font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.6px;
+    color:var(--ink-soft); margin:18px 2px 8px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .fact-row{
+    background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 12px;
+    margin-bottom:8px; display:flex; align-items:center; gap:10px;
+  }
+  .fact-row .q{ flex:1; min-width:0; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .box-dots{ display:flex; gap:3px; flex-shrink:0; }
+  .box-dots span{ width:6px; height:6px; border-radius:50%; background:var(--line); }
+  .box-dots span.filled{ background:var(--brass); }
+  .add-fact-btn{
+    width:100%; padding:13px; border-radius:8px; border:1.5px dashed rgba(43,38,33,0.3);
+    background:transparent; color:var(--ink-soft); font-family:var(--font-mono); font-size:12.5px;
+    letter-spacing:0.4px; text-transform:uppercase;
+  }
+  .empty-note{ font-size:14px; color:var(--ink-soft); padding:14px 2px; font-style:italic; }
+
+  /* ---- Learn / Test card stage ---- */
+  .stage{ display:flex; flex-direction:column; align-items:center; padding-top:8px; }
+  .progress-line{
+    width:100%; font-family:var(--font-mono); font-size:11px; color:var(--ink-soft);
+    display:flex; justify-content:space-between; margin-bottom:10px; letter-spacing:0.3px;
+  }
+  .flip-card{
+    width:100%; max-width:420px; aspect-ratio:4/5; perspective:1200px; margin-bottom:20px;
+  }
+  .flip-inner{
+    position:relative; width:100%; height:100%; transition:transform 0.5s cubic-bezier(.4,.2,.2,1);
+    transform-style:preserve-3d;
+  }
+  .flip-inner.flipped{ transform:rotateY(180deg); }
+  .face{
+    position:absolute; inset:0; backface-visibility:hidden; border-radius:12px;
+    background:var(--card); border:1px solid var(--line);
+    box-shadow:0 4px 14px rgba(43,38,33,0.12);
+    display:flex; flex-direction:column; padding:22px;
+  }
+  .face .kicker{
+    font-family:var(--font-mono); font-size:10.5px; letter-spacing:1px; text-transform:uppercase;
+    color:var(--brass);
+  }
+  .face .content{
+    flex:1; display:flex; align-items:center; justify-content:center; text-align:center;
+    font-family:var(--font-body); font-size:20px; line-height:1.4; padding:10px 0;
+  }
+  .face .hint{
+    text-align:center; font-family:var(--font-mono); font-size:11px; color:var(--ink-soft);
+    letter-spacing:0.4px; text-transform:uppercase;
+  }
+  .face.back{ transform:rotateY(180deg); }
+
+  .learn-nav{ display:flex; gap:14px; width:100%; max-width:420px; }
+  .learn-nav button{
+    flex:1; padding:14px; border-radius:8px; border:1px solid var(--line);
+    background:var(--card); font-family:var(--font-mono); font-size:13px; letter-spacing:0.5px;
+  }
+  .learn-nav button.primary{ background:var(--drawer); color:#F1ECDC; border:none; }
+
+  .grade-row{ display:flex; gap:12px; width:100%; max-width:420px; }
+  .grade-row button{
+    flex:1; padding:16px; border-radius:8px; border:none; font-family:var(--font-display);
+    font-size:15px; font-weight:600;
+  }
+  .grade-row .miss{ background:var(--stamp); color:#FBF8EF; }
+  .grade-row .got{ background:var(--brass); color:#2B2621; }
+  .reveal-btn{
+    width:100%; max-width:420px; padding:16px; border-radius:8px; border:none;
+    background:var(--drawer); color:#F1ECDC; font-family:var(--font-display); font-size:15px; font-weight:600;
+  }
+
+  /* summary */
+  .summary{ text-align:center; padding-top:30px; }
+  .summary .stamp-mark{
+    width:110px; height:110px; margin:0 auto 20px; border-radius:50%; border:3px solid var(--stamp);
+    color:var(--stamp); display:flex; align-items:center; justify-content:center; flex-direction:column;
+    transform:rotate(-8deg); font-family:var(--font-display);
+  }
+  .summary .stamp-mark .n{ font-size:30px; font-weight:700; line-height:1; }
+  .summary .stamp-mark .l{ font-family:var(--font-mono); font-size:9px; letter-spacing:1px; text-transform:uppercase; }
+  .summary h2{ font-family:var(--font-display); font-size:20px; margin:0 0 6px; }
+  .summary p{ color:var(--ink-soft); font-size:14px; margin:0 0 26px; }
+  .summary button{
+    padding:14px 28px; border-radius:8px; border:none; background:var(--drawer); color:#F1ECDC;
+    font-family:var(--font-mono); font-size:13px; letter-spacing:0.5px;
+  }
+
+  /* modal */
+  .overlay{
+    position:fixed; inset:0; background:rgba(43,38,33,0.45); display:flex; align-items:flex-end;
+    z-index:50; animation:fadeIn 0.18s ease;
+  }
+  .sheet{
+    background:var(--paper); width:100%; border-radius:16px 16px 0 0; padding:20px 18px calc(20px + env(safe-area-inset-bottom));
+    max-height:82vh; overflow-y:auto;
+  }
+  .sheet h3{ font-family:var(--font-display); margin:0 0 16px; font-size:17px; }
+  .field{ margin-bottom:14px; }
+  .field label{
+    display:block; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:0.5px; color:var(--ink-soft); margin-bottom:5px;
+  }
+  .field input, .field textarea, .field select{
+    width:100%; border:1px solid var(--line); border-radius:8px; padding:11px 12px;
+    font-family:var(--font-body); font-size:15px; background:var(--card); color:var(--ink);
+    resize:none;
+  }
+  .field textarea{ min-height:70px; }
+  .content-wrap{ display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; }
+  .speak-btn{
+    flex-shrink:0; width:38px; height:38px; border-radius:50%; border:1px solid var(--line);
+    background:var(--paper); font-size:16px; display:inline-flex; align-items:center; justify-content:center;
+  }
+  .speak-btn.small{ width:28px; height:28px; font-size:12px; }
+  .example{
+    text-align:center; font-family:var(--font-body); font-style:italic; font-size:13.5px;
+    color:var(--ink-soft); padding:0 8px 6px; display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .swatches{ display:flex; gap:10px; }
+  .swatch{ width:32px; height:32px; border-radius:50%; border:2px solid transparent; }
+  .swatch.selected{ border-color:var(--ink); }
+  .sheet-actions{ display:flex; gap:10px; margin-top:6px; }
+  .sheet-actions button{ flex:1; padding:13px; border-radius:8px; border:none; font-family:var(--font-mono); font-size:13px; }
+  .sheet-actions .save{ background:var(--drawer); color:#F1ECDC; }
+  .sheet-actions .cancel{ background:transparent; border:1px solid var(--line); color:var(--ink-soft); }
+  .sheet-actions .delete{ background:var(--stamp); color:#FBF8EF; }
+
+  .loading{ text-align:center; padding:60px 0; color:var(--ink-soft); font-family:var(--font-mono); font-size:12px; }
+
+  /* ---- Map type chip on new-drawer sheet ---- */
+  .type-toggle{ display:flex; gap:8px; margin-bottom:16px; }
+  .type-toggle button{
+    flex:1; padding:12px; border-radius:8px; border:1.5px solid var(--line); background:var(--card);
+    font-family:var(--font-mono); font-size:12px; letter-spacing:0.4px; text-transform:uppercase; color:var(--ink-soft);
+  }
+  .type-toggle button.selected{ background:var(--drawer); border-color:var(--drawer); color:#F1ECDC; }
+
+  /* ---- Map topic view ---- */
+  .mode-buttons.triple{ flex-direction:column; }
+  .mode-buttons.triple .mode-btn{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; }
+  .mode-buttons.triple .mode-btn .txt{ text-align:left; }
+  .mode-buttons.triple .mode-btn.explore{ background:var(--card); border:1.5px solid var(--line); color:var(--ink); }
+  .mode-buttons.triple .mode-btn.locate{ background:var(--drawer); color:#F1ECDC; border:none; }
+  .mode-buttons.triple .mode-btn.name{ background:var(--stamp); color:#FBF8EF; border:none; }
+  .map-stat-grid{ display:flex; gap:10px; margin:14px 0 4px; }
+  .map-stat{ flex:1; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 8px; text-align:center; }
+  .map-stat .n{ font-family:var(--font-display); font-size:19px; font-weight:600; }
+  .map-stat .l{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-soft); margin-top:2px; }
+  .cat-scroll{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin:-2px -2px 2px; }
+  .cat-scroll::-webkit-scrollbar{ display:none; }
+  .cat-chip{
+    flex-shrink:0; padding:8px 14px; border-radius:16px; border:1.5px solid var(--line); background:var(--card);
+    font-family:var(--font-mono); font-size:11.5px; letter-spacing:0.3px; color:var(--ink-soft); white-space:nowrap;
+  }
+  .cat-chip.selected{ background:var(--drawer); border-color:var(--drawer); color:#F1ECDC; }
+
+  /* ---- Map stage ---- */
+  .map-stage{ padding:0 !important; display:flex; flex-direction:column; height:100%; }
+  .map-banner{
+    padding:12px 16px; background:var(--card); border-bottom:1px solid var(--line);
+    display:flex; justify-content:space-between; align-items:center; flex-shrink:0;
+  }
+  .map-banner .prompt{ font-family:var(--font-display); font-size:17px; font-weight:600; }
+  .map-banner .meta{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.4px; }
+  .map-svg-wrap{ flex:1; min-height:0; position:relative; overflow:hidden; background:#7FA8BE; touch-action:none; }
+  .map-svg-wrap svg{ width:100%; height:100%; display:block; touch-action:none; }
+  .ocean{ fill:#7FA8BE; }
+  .zoom-fit-btn{
+    position:absolute; right:10px; bottom:10px; z-index:4; padding:9px 13px; border-radius:20px; border:none;
+    background:rgba(43,38,33,0.78); color:#F1ECDC; font-family:var(--font-mono); font-size:11.5px; letter-spacing:0.3px;
+  }
+  .country{ fill:#C9C2A8; stroke:#6F97AC; stroke-width:0.6; cursor:pointer; fill-rule:evenodd; }
+  .country.target{ fill:var(--drawer) !important; }
+  .country.correct{ fill:var(--brass) !important; opacity:1 !important; }
+  .country.wrong{ fill:var(--stamp) !important; opacity:1 !important; }
+  .country.reveal{ fill:var(--brass) !important; opacity:0.85 !important; }
+  .pin{ fill:var(--brass); stroke:#2B2621; cursor:pointer; }
+  .pin.marker-hidden{ display:none; }
+  .graticule{ fill:none; stroke:#6F97AC; stroke-width:0.35; opacity:0.6; }
+  .map-feedback-banner{
+    padding:14px 16px; text-align:center; font-family:var(--font-display); font-size:15px; font-weight:600;
+    flex-shrink:0;
+  }
+  .map-feedback-banner.correct{ background:var(--brass); color:#2B2621; }
+  .map-feedback-banner.wrong{ background:var(--stamp); color:#FBF8EF; }
+  .name-input-row{
+    padding:14px 16px calc(14px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line);
+    display:flex; gap:10px; flex-shrink:0;
+  }
+  .name-input-row input{
+    flex:1; border:1px solid var(--line); border-radius:8px; padding:12px 14px; font-family:var(--font-body);
+    font-size:16px; background:var(--paper); color:var(--ink);
+  }
+  .name-input-row button{
+    padding:12px 18px; border-radius:8px; border:none; background:var(--drawer); color:#F1ECDC;
+    font-family:var(--font-mono); font-size:13px; letter-spacing:0.4px;
+  }
+  .map-next-row{ padding:14px 16px calc(14px + env(safe-area-inset-bottom)); flex-shrink:0; }
+  .map-next-row button{
+    width:100%; padding:14px; border-radius:8px; border:none; background:var(--drawer); color:#F1ECDC;
+    font-family:var(--font-display); font-size:15px; font-weight:600;
+  }
+  .map-error{ text-align:center; padding:40px 24px; color:var(--ink-soft); font-family:var(--font-body); font-size:14.5px; line-height:1.5; }
+  .map-error button{
+    margin-top:16px; padding:12px 22px; border-radius:8px; border:none; background:var(--drawer); color:#F1ECDC;
+    font-family:var(--font-mono); font-size:12.5px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar" id="topbar"></header>
+  <main id="main"></main>
+</div>
+
+<script>
+(function(){
+  var STORAGE_KEY = 'app-data';
+  var COLORS = ['#2E4034','#5B3A29','#3A4A5E','#5E3A4E','#3A4A2E'];
+  var BOX_INTERVALS = [0,1,3,7,14]; // days, index = box-1
+
+  var state = { topics: [], loaded:false };
+  var nav = []; // view stack: {view, topicId, sessionQueue, sessionIndex, sessionResults, factIndex}
+
+  function todayStr(){ return new Date().toISOString().slice(0,10); }
+  function addDays(dstr, n){
+    var d = new Date(dstr + 'T00:00:00');
+    d.setDate(d.getDate()+n);
+    return d.toISOString().slice(0,10);
+  }
+  function uid(){ return Math.random().toString(36).slice(2,10); }
+
+  function defaultData(){
+    return { topics: [
+      { id: uid(), name:'Geography', type:'facts', color:COLORS[0], facts:[
+        mkFact('What is the longest river in the world?', 'The Nile River (approx. 6,650 km)'),
+        mkFact('Which country has the most time zones?', 'France (12, due to its overseas territories)'),
+        mkFact('What is the smallest country by area?', 'Vatican City'),
+        mkFact('Which desert is the largest hot desert on Earth?', 'The Sahara Desert')
+      ]},
+      { id: uid(), name:'World Map', type:'map', mapId:'world', color:COLORS[3], progress:{} },
+      { id: uid(), name:'Language', type:'facts', color:COLORS[1], facts:[
+        mkFact('What does "ubiquitous" mean?', 'Present, appearing, or found everywhere'),
+        mkFact('What is a "portmanteau" word?', 'A blend of two words, like "brunch" (breakfast + lunch)'),
+        mkFact('What language has the most native speakers?', 'Mandarin Chinese')
+      ]},
+      { id: uid(), name:'Science', type:'facts', color:COLORS[2], facts:[
+        mkFact('What is the powerhouse of the cell?', 'The mitochondrion'),
+        mkFact('What is the speed of light in a vacuum?', 'About 299,792 km per second'),
+        mkFact('What element has the atomic number 1?', 'Hydrogen'),
+        mkFact('What force keeps planets in orbit around the sun?', 'Gravity')
+      ]}
+    ]};
+  }
+  function mkFact(q,a,example,exampleTranslation){
+    return { id: uid(), q:q, a:a, example: example||'', exampleTranslation: exampleTranslation||'', box:1, nextReview: todayStr() };
+  }
+  var CARD_ORDER_OPTIONS = [['prompt','Prompt first, then answer'],['answer','Answer first, then prompt'],['random','Random each card']];
+
+  var LANG_OPTIONS = [
+    ['', 'None / default voice'], ['en-US','English'], ['de-DE','German'], ['fr-FR','French'],
+    ['es-ES','Spanish'], ['it-IT','Italian'], ['pt-PT','Portuguese'], ['nl-NL','Dutch'],
+    ['sv-SE','Swedish'], ['ru-RU','Russian'], ['pl-PL','Polish'], ['tr-TR','Turkish'],
+    ['ja-JP','Japanese'], ['ko-KR','Korean'], ['zh-CN','Mandarin Chinese'], ['ar-SA','Arabic'],
+    ['hi-IN','Hindi'], ['el-GR','Greek']
+  ];
+  var pendingUtterance = null;
+  if('speechSynthesis' in window){
+    try{ window.speechSynthesis.getVoices(); } catch(e){} // warm up voice list early
+  }
+  function speak(text, lang){
+    if(!text || !('speechSynthesis' in window)) return;
+    try{
+      window.speechSynthesis.cancel();
+      setTimeout(function(){
+        var u = new SpeechSynthesisUtterance(text);
+        if(lang) u.lang = lang;
+        u.rate = 0.92;
+        pendingUtterance = u; // keep a live reference — iOS Safari can silently drop speech if the utterance gets garbage collected
+        window.speechSynthesis.speak(u);
+      }, 60);
+    } catch(e){}
+  }
+
+  var storageShim = {
+    get: async function(key, shared){
+      if(window.storage) return window.storage.get(key, shared);
+      try{
+        var raw = localStorage.getItem('memory-catalog:'+key);
+        if(raw===null) return null;
+        return { key:key, value:raw, shared: !!shared };
+      } catch(e){ return null; }
+    },
+    set: async function(key, value, shared){
+      if(window.storage) return window.storage.set(key, value, shared);
+      try{
+        localStorage.setItem('memory-catalog:'+key, value);
+        return { key:key, value:value, shared: !!shared };
+      } catch(e){ return null; }
+    }
+  };
+
+  async function loadData(){
+    try{
+      var res = await storageShim.get(STORAGE_KEY, false);
+      if(res && res.value){
+        state = JSON.parse(res.value);
+      } else {
+        state = defaultData();
+        await saveData();
+      }
+    } catch(e){
+      state = defaultData();
+      try{ await saveData(); } catch(e2){}
+    }
+    state.loaded = true;
+  }
+  async function saveData(){
+    try{
+      var copy = { topics: state.topics };
+      await storageShim.set(STORAGE_KEY, JSON.stringify(copy), false);
+    } catch(e){ console.error('save failed', e); }
+  }
+
+  var MAP_CATEGORIES = ['World','Europe','Asia','Africa','North & Central America','Caribbean','South America','Oceania'];
+  function featureCategory(f){
+    var c = f.properties.CONTINENT, s = f.properties.SUBREGION;
+    if(c==='Europe') return 'Europe';
+    if(c==='Asia') return 'Asia';
+    if(c==='Africa') return 'Africa';
+    if(c==='Oceania') return 'Oceania';
+    if(c==='South America') return 'South America';
+    if(c==='North America'){ return s==='Caribbean' ? 'Caribbean' : 'North & Central America'; }
+    return null;
+  }
+  function categoryFeatures(category){
+    if(!mapEngine.features) return [];
+    if(!category || category==='World') return mapEngine.features;
+    return mapEngine.features.filter(function(f){ return featureCategory(f)===category; });
+  }
+
+  function dueCount(topic, category){
+    var t = todayStr();
+    if((topic.type||'facts')==='map'){
+      if(!mapEngine.features) return 0;
+      return categoryFeatures(category).filter(function(f){
+        var p = (topic.progress||{})[f.properties.name];
+        return !p || p.nextReview <= t;
+      }).length;
+    }
+    if(hasDecks(topic)){
+      var total = 0;
+      topic.decks.forEach(function(d){ total += d.facts.filter(function(f){ return f.nextReview <= t; }).length; });
+      return total;
+    }
+    return topic.facts.filter(function(f){ return f.nextReview <= t; }).length;
+  }
+  function topicById(id){ return state.topics.find(function(t){ return t.id===id; }); }
+  function factById(topic, id){ return topic.facts.find(function(f){ return f.id===id; }); }
+
+  function ensureCountryProgress(topic, name){
+    if(!topic.progress) topic.progress = {};
+    if(!topic.progress[name]) topic.progress[name] = { box:1, nextReview: todayStr(), seen:false };
+    return topic.progress[name];
+  }
+  function gradeCountry(topic, name, correct){
+    var p = ensureCountryProgress(topic, name);
+    if(correct){ p.box = Math.min(5, p.box+1); p.nextReview = addDays(todayStr(), BOX_INTERVALS[p.box-1]); }
+    else { p.box = 1; p.nextReview = addDays(todayStr(), BOX_INTERVALS[0]); }
+    saveData();
+  }
+  function buildMapQueue(topic, category){
+    var t = todayStr();
+    var pool0 = categoryFeatures(category);
+    var due = pool0.filter(function(f){
+      var p = (topic.progress||{})[f.properties.name];
+      return !p || p.nextReview <= t;
+    });
+    var pool = due.length ? due.slice() : pool0.slice();
+    shuffle(pool);
+    return pool.map(function(f){ return f.properties.name; });
+  }
+
+  // ---------- MAP ENGINE ----------
+  var mapEngine = { features:null, loading:false, error:null, promise:null, log:[] };
+  function mlog(msg){ mapEngine.log.push(msg); }
+  var MAP_DATA_URLS = [
+    'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_0_countries.geojson',
+    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson'
+  ];
+  function stripInteriorRings(geometry){
+    if(!geometry) return geometry;
+    if(geometry.type==='Polygon'){
+      geometry.coordinates = geometry.coordinates.length ? [geometry.coordinates[0]] : geometry.coordinates;
+    } else if(geometry.type==='MultiPolygon'){
+      geometry.coordinates = geometry.coordinates.map(function(poly){ return poly.length ? [poly[0]] : poly; });
+    }
+    return geometry;
+  }
+  function loadMapData(){
+    if(mapEngine.promise) return mapEngine.promise;
+    mapEngine.loading = true;
+    mapEngine.promise = (async function(){
+      var lastErr = null;
+      for(var i=0; i<MAP_DATA_URLS.length; i++){
+        try{
+          var res = await fetch(MAP_DATA_URLS[i]);
+          if(!res.ok) throw new Error('fetch failed: ' + res.status);
+          var geo = await res.json();
+          mlog('Main dataset loaded: ' + (geo.features?geo.features.length:0) + ' raw features from ' + MAP_DATA_URLS[i]);
+          var SOVEREIGN_TYPES = { 'Sovereign country':1, 'Country':1 };
+          // Explicitly excluded: these carry TYPE "Country" in the data (same as real sovereign
+          // countries) but are constituent/dependent territories, not sovereign countries themselves.
+          var NON_SOVEREIGN_EXCLUDE = {
+            'Guernsey':1, 'Jersey':1, 'Isle of Man':1, 'Greenland':1, 'Aruba':1, 'Curaçao':1, 'Curacao':1,
+            'Sint Maarten':1, 'Bermuda':1, 'Cayman Islands':1, 'British Virgin Islands':1,
+            'Turks and Caicos Islands':1, 'Falkland Islands':1, 'Gibraltar':1, 'Faroe Islands':1,
+            'French Polynesia':1, 'New Caledonia':1, 'Puerto Rico':1, 'American Samoa':1, 'Guam':1,
+            'Northern Mariana Islands':1, 'United States Virgin Islands':1, 'Hong Kong S.A.R.':1,
+            'Hong Kong':1, 'Macao S.A.R':1, 'Macau':1, 'Cook Islands':1, 'Niue':1, 'Anguilla':1,
+            'Montserrat':1, 'Saint Helena':1, 'Sint Eustatius':1, 'Saba':1, 'Bonaire':1, 'Tokelau':1,
+            'Norfolk Island':1, 'Christmas Island':1, 'Cocos Islands':1, 'Åland':1, 'Aland':1
+          };
+          var israelRaw = (geo.features||[]).find(function(f){ return f.properties && (f.properties.ADMIN==='Israel' || f.properties.NAME==='Israel'); });
+          mlog('Israel present in raw data: ' + (!!israelRaw) + (israelRaw ? (', TYPE=' + israelRaw.properties.TYPE + ', geometry=' + (israelRaw.geometry?israelRaw.geometry.type:'none') + ', rings=' + (israelRaw.geometry && israelRaw.geometry.coordinates ? JSON.stringify(israelRaw.geometry.coordinates).length + ' chars' : 'n/a')) : ''));
+          var features = (geo.features || []).filter(function(f){
+            var nm = f.properties && (f.properties.ADMIN || f.properties.NAME);
+            return f && f.geometry && f.properties && nm
+              && f.properties.CONTINENT && f.properties.CONTINENT !== 'Antarctica' && f.properties.CONTINENT !== 'Seven seas (open ocean)'
+              && SOVEREIGN_TYPES[f.properties.TYPE]
+              && !NON_SOVEREIGN_EXCLUDE[nm];
+          }).map(function(f){
+            f.properties.name = f.properties.ADMIN || f.properties.NAME;
+            stripInteriorRings(f.geometry);
+            return f;
+          });
+          mlog('After sovereignty filter: ' + features.length + ' countries kept. Israel kept: ' + features.some(function(f){return f.properties.name==='Israel';}));
+          if(features.length < 100) throw new Error('unexpectedly few countries: ' + features.length);
+          // A small number of countries have known bad geometry at 10m resolution in this dataset
+          // (e.g. Kazakhstan's Baikonur Cosmodrome lease renders as a large gap) or get dropped
+          // entirely by the sovereignty filter above due to a property-naming quirk. For each one,
+          // try several independent sources in turn until a usable geometry is found.
+          var PATCH_COUNTRY_SOURCES = [
+            'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_countries.geojson',
+            'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_countries.geojson',
+            'https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json'
+          ];
+          async function patchCountryGeometry(name){
+            try{
+              var lname = name.toLowerCase();
+              var isMatch = function(props){
+                if(!props) return false;
+                var candidates = [props.ADMIN, props.NAME, props.name, props.SOVEREIGNT, props.NAME_LONG];
+                return candidates.some(function(v){ return v && String(v).trim().toLowerCase()===lname; });
+              };
+              var main = features.find(function(f){ return f.properties.name===name; });
+              if(!main){
+                mlog(name + ': not in filtered set, searching raw data...');
+                var raw = (geo.features||[]).find(function(f){ return isMatch(f.properties); });
+                if(raw){
+                  raw.properties.name = name;
+                  stripInteriorRings(raw.geometry);
+                  features.push(raw);
+                  main = raw;
+                  mlog(name + ': found in raw data (TYPE=' + raw.properties.TYPE + '), force-added.');
+                } else {
+                  mlog(name + ': NOT FOUND anywhere in raw data. Skipping patch.');
+                }
+              }
+              if(!main) return;
+              for(var k=0; k<PATCH_COUNTRY_SOURCES.length; k++){
+                try{
+                  var altRes = await fetch(PATCH_COUNTRY_SOURCES[k]);
+                  if(!altRes.ok){ mlog(name + ': source ' + k + ' HTTP ' + altRes.status); continue; }
+                  var altGeo = await altRes.json();
+                  var alt = (altGeo.features||[]).find(function(f){ return isMatch(f.properties); });
+                  if(alt && alt.geometry && alt.geometry.coordinates && alt.geometry.coordinates.length){
+                    stripInteriorRings(alt.geometry);
+                    main.geometry = alt.geometry;
+                    mlog(name + ': geometry patched successfully from source ' + k + ' (' + PATCH_COUNTRY_SOURCES[k] + ')');
+                    return;
+                  } else {
+                    mlog(name + ': source ' + k + ' loaded (' + (altGeo.features?altGeo.features.length:0) + ' features) but no name match found');
+                  }
+                } catch(eInner){ mlog(name + ': source ' + k + ' threw: ' + eInner.message); }
+              }
+              mlog(name + ': all patch sources exhausted, no fix applied — geometry unchanged.');
+            } catch(e2){ mlog(name + ': patch function threw: ' + e2.message); }
+          }
+          await patchCountryGeometry('Kazakhstan');
+          await patchCountryGeometry('Israel');
+          // Add Palestine (West Bank + Gaza) as its own map entity, drawn on top of Israel in those
+          // two areas — same layering technique already used for enclaves like San Marino and Vatican
+          // City, so no risky polygon subtraction from Israel's shape is needed. Sourced from Natural
+          // Earth's separate disputed-areas layer, since West Bank/Gaza aren't in the main countries file.
+          try{
+            var toParts = function(geom){
+              if(!geom) return [];
+              if(geom.type==='Polygon') return [geom.coordinates];
+              if(geom.type==='MultiPolygon') return geom.coordinates;
+              return [];
+            };
+            var disputedUrls = [
+              'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_10m_admin_0_breakaway_disputed_areas.geojson',
+              'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_breakaway_disputed_areas.geojson'
+            ];
+            var disputedFeatures = null;
+            for(var d=0; d<disputedUrls.length; d++){
+              try{
+                var dRes = await fetch(disputedUrls[d]);
+                if(dRes.ok){ var dGeo = await dRes.json(); disputedFeatures = dGeo.features||[]; mlog('Disputed-areas dataset loaded from source ' + d + ': ' + disputedFeatures.length + ' features'); break; }
+                else mlog('Disputed-areas source ' + d + ' HTTP ' + dRes.status);
+              } catch(eD){ mlog('Disputed-areas source ' + d + ' threw: ' + eD.message); }
+            }
+            if(disputedFeatures){
+              mlog('Disputed-area names sample: ' + disputedFeatures.slice(0,15).map(function(f){ return f.properties && (f.properties.NAME||f.properties.name||f.properties.BRK_NAME||'?'); }).join(', '));
+              var matchesAny = function(props, needles){
+                if(!props) return false;
+                return Object.keys(props).some(function(k){
+                  var v = props[k];
+                  if(typeof v !== 'string') return false;
+                  var vl = v.trim().toLowerCase();
+                  return needles.indexOf(vl) !== -1;
+                });
+              };
+              var wb = disputedFeatures.filter(function(f){ return matchesAny(f.properties, ['west bank']); });
+              var gz = disputedFeatures.filter(function(f){ return matchesAny(f.properties, ['gaza strip','gaza']); });
+              mlog('West Bank features matched: ' + wb.length + ', Gaza features matched: ' + gz.length);
+              var parts = [];
+              wb.concat(gz).forEach(function(f){ parts = parts.concat(toParts(f.geometry)); });
+              if(parts.length){
+                var israelFeature = features.find(function(f){ return f.properties.name==='Israel'; });
+                var palestine = {
+                  type:'Feature',
+                  properties:{ name:'Palestine', CONTINENT: israelFeature ? israelFeature.properties.CONTINENT : 'Asia' },
+                  geometry:{ type:'MultiPolygon', coordinates: parts }
+                };
+                features.push(palestine);
+                mlog('Palestine feature created with ' + parts.length + ' polygon part(s) and added to map.');
+              } else {
+                mlog('No usable West Bank/Gaza geometry found — Palestine NOT added.');
+              }
+            } else {
+              mlog('Could not load disputed-areas dataset from any source — Palestine NOT added.');
+            }
+          } catch(e3){ mlog('Palestine block threw: ' + e3.message); }
+          mapEngine.features = features;
+          mapEngine.error = null;
+          mapEngine.loading = false;
+          return;
+        } catch(e){
+          lastErr = e;
+        }
+      }
+      mapEngine.error = lastErr || new Error('unknown map load error');
+      mapEngine.loading = false;
+    })();
+    return mapEngine.promise;
+  }
+
+  function normalizeName(s){
+    s = (s||'').toLowerCase();
+    if(typeof s.normalize === 'function'){ s = s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+    s = s.replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+    s = s.replace(/^the\s+/, '');
+    return s;
+  }
+  var COUNTRY_ALIASES = {
+    'usa':'united states of america','us':'united states of america','united states':'united states of america',
+    'america':'united states of america','uk':'united kingdom','great britain':'united kingdom','britain':'united kingdom',
+    'uae':'united arab emirates','emirates':'united arab emirates',
+    'drc':'democratic republic of the congo','dr congo':'democratic republic of the congo','dem rep congo':'democratic republic of the congo',
+    'congo brazzaville':'republic of the congo','ivory coast':'cote d ivoire','czech republic':'czechia',
+    'myanmar':'myanmar','burma':'myanmar','south korea':'south korea','korea south':'south korea',
+    'north korea':'north korea','korea north':'north korea','russia':'russia','laos':'laos',
+    'swaziland':'eswatini','macedonia':'north macedonia','holland':'netherlands','bosnia':'bosnia and herzegovina'
+  };
+  function levenshtein1OrLess(a,b){
+    if(Math.abs(a.length-b.length) > 1) return false;
+    if(a===b) return true;
+    var la=a.length, lb=b.length, i=0, j=0, diffs=0;
+    while(i<la && j<lb){
+      if(a[i]===b[j]){ i++; j++; continue; }
+      diffs++;
+      if(diffs>1) return false;
+      if(la===lb){ i++; j++; }
+      else if(la>lb){ i++; }
+      else { j++; }
+    }
+    return true;
+  }
+  function nameMatches(input, targetName){
+    var ni = normalizeName(input);
+    var nt = normalizeName(targetName);
+    if(!ni) return false;
+    if(ni === nt) return true;
+    if(COUNTRY_ALIASES[ni] === nt) return true;
+    if(nt.length > 5 && ni.length >= 4 && (nt.indexOf(ni) !== -1)) return true;
+    if(ni.length >= 5 && levenshtein1OrLess(ni, nt)) return true;
+    return false;
+  }
+  var MAP_CATEGORY_CENTER = {
+    'World': 0, 'Europe': 20, 'Asia': 90, 'Africa': 20,
+    'North & Central America': -100, 'Caribbean': -75, 'South America': -60, 'Oceania': 170
+  };
+  function buildMapSVG(features, opts, centerLon){
+    opts = opts || {};
+    var w = 1000, h = 620;
+    var projection = d3.geoNaturalEarth1();
+    if(centerLon) projection.rotate([-centerLon, 0, 0]);
+    var fc = { type:'FeatureCollection', features: mapEngine.features };
+    projection.fitExtent([[4,4],[w-4,h-4]], fc);
+    var pathGen = d3.geoPath(projection);
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 '+w+' '+h);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+    var ocean = document.createElementNS(svgNS,'rect');
+    ocean.setAttribute('x','0'); ocean.setAttribute('y','0');
+    ocean.setAttribute('width', String(w)); ocean.setAttribute('height', String(h));
+    ocean.setAttribute('class','ocean');
+    svg.appendChild(ocean);
+
+    try{
+      var gratGen = d3.geoGraticule().step([10,10]);
+      var grat = document.createElementNS(svgNS,'path');
+      grat.setAttribute('class','graticule');
+      grat.setAttribute('d', pathGen(gratGen()));
+      svg.appendChild(grat);
+    } catch(e){}
+
+    var withArea = features.map(function(f){
+      var area = 0;
+      try{ area = Math.abs(pathGen.area(f)); } catch(e){}
+      return { f:f, area:area };
+    });
+    withArea.sort(function(a,b){ return b.area - a.area; }); // largest first, smallest drawn last (on top)
+
+    var markerGroup = document.createElementNS(svgNS,'g');
+    markerGroup.setAttribute('class','markers');
+
+    withArea.forEach(function(entry){
+      var f = entry.f;
+      var d = pathGen(f);
+      if(!d) return;
+      var p = document.createElementNS(svgNS,'path');
+      p.setAttribute('d', d);
+      p.setAttribute('class','country');
+      p.setAttribute('vector-effect','non-scaling-stroke');
+      p.setAttribute('data-name', f.properties.name);
+      try{
+        var b = pathGen.bounds(f);
+        var bw = b[1][0]-b[0][0], bh = b[1][1]-b[0][1];
+        if(Math.max(bw,bh) < 6){ // very small country: tag for generous tap-target handling + pin marker
+          var c = pathGen.centroid(f);
+          if(isFinite(c[0]) && isFinite(c[1])){
+            p.setAttribute('data-small','1');
+            p.setAttribute('data-bw', String(Math.max(bw,bh)));
+            p.setAttribute('data-cx', String(c[0]));
+            p.setAttribute('data-cy', String(c[1]));
+            var pin = document.createElementNS(svgNS,'circle');
+            pin.setAttribute('cx', c[0]); pin.setAttribute('cy', c[1]);
+            pin.setAttribute('r', 3); // real size set dynamically per zoom level (see updateMarkerVisibility)
+            pin.setAttribute('class','pin');
+            pin.setAttribute('data-name', f.properties.name);
+            pin.setAttribute('data-bw', String(Math.max(bw,bh)));
+            markerGroup.appendChild(pin);
+          }
+        }
+      } catch(e){}
+      if(opts.getFill){ var c2 = opts.getFill(f); if(c2) p.style.fill = c2; }
+      if(opts.getOpacity){ var o = opts.getOpacity(f); if(o!=null) p.style.opacity = o; }
+      svg.appendChild(p);
+    });
+    svg.appendChild(markerGroup);
+
+    return { svg:svg, w:w, h:h, pathGen:pathGen, projection:projection };
+  }
+
+  function boundsForFeatures(ctx, features, padFactor){
+    var list = features && features.length ? features : mapEngine.features;
+    var compact = list;
+    if(list.length > 1){
+      var withW = list.map(function(f){
+        var b = null;
+        try{ b = ctx.pathGen.bounds(f); } catch(e){}
+        return { f:f, w: b ? (b[1][0]-b[0][0]) : 0 };
+      }).filter(function(o){ return isFinite(o.w) && o.w > 0; });
+      var threshold = ctx.w * 0.4; // wider than 40% of the whole world = transcontinental outlier (e.g. Russia)
+      var filtered = withW.filter(function(o){ return o.w < threshold; });
+      if(filtered.length){ compact = filtered.map(function(o){ return o.f; }); }
+    }
+    var fc = { type:'FeatureCollection', features: compact };
+    var b = ctx.pathGen.bounds(fc); // [[x0,y0],[x1,y1]]
+    var x0=b[0][0], y0=b[0][1], x1=b[1][0], y1=b[1][1];
+    var w = Math.max(1, x1-x0), h = Math.max(1, y1-y0);
+    var pad = (padFactor==null?0.18:padFactor);
+    x0 -= w*pad; x1 += w*pad; y0 -= h*pad; y1 += h*pad;
+    return { x:x0, y:y0, w:(x1-x0), h:(y1-y0) };
+  }
+
+  // Locks a view rect to the container's actual on-screen aspect ratio so the SVG never letterboxes.
+  // Letterboxing was the real cause of "sluggish" vertical panning: our pan math assumed the map filled
+  // the whole container, but when the aspect ratios mismatched, part of that space was blank, so screen
+  // pixels didn't correspond 1:1 to map movement in the letterboxed dimension.
+  function aspectFit(view, rect){
+    if(!rect || !rect.width || !rect.height) return view;
+    var targetAspect = rect.height/rect.width; // h/w
+    var currentAspect = view.h/view.w;
+    var v = { x:view.x, y:view.y, w:view.w, h:view.h };
+    if(currentAspect < targetAspect){
+      var newH = v.w*targetAspect;
+      v.y -= (newH-v.h)/2; v.h = newH;
+    } else if(currentAspect > targetAspect){
+      var newW = v.h/targetAspect;
+      v.x -= (newW-v.w)/2; v.w = newW;
+    }
+    return v;
+  }
+
+  // ---------- PAN / ZOOM ----------
+  function attachPanZoom(wrapEl, ctx, initialView, worldBounds, onTap){
+    var view = { x:initialView.x, y:initialView.y, w:initialView.w, h:initialView.h };
+    var maxW = worldBounds.w * 1.05;
+    var minW = worldBounds.w / 3000; // deep zoom ceiling
+    var pointers = {};
+    var dragStart = null, pinchStart = null, moved = false, tapInfo = null;
+    var lastActivity = Date.now();
+    var moveSamples = []; // recent {t,x,y} view-space samples, for momentum on release
+    var lastPinchEndT = -1000;
+    var inertiaRAF = null;
+
+    function cancelInertia(){ if(inertiaRAF){ cancelAnimationFrame(inertiaRAF); inertiaRAF = null; } }
+    function startInertia(vx, vy){ // vx,vy = view-space units per ms
+      cancelInertia();
+      var lastT = performance.now();
+      function step(now){
+        var dt = Math.min(48, now-lastT); lastT = now;
+        var decay = Math.pow(0.94, dt/16);
+        vx *= decay; vy *= decay;
+        view.x += vx*dt; view.y += vy*dt;
+        var beforeClampX = view.x, beforeClampY = view.y;
+        clampView();
+        if(view.x !== beforeClampX) vx *= 0.4; // hit a bound: damp instead of hard stop
+        if(view.y !== beforeClampY) vy *= 0.4;
+        applyView();
+        if(Math.hypot(vx,vy) > 0.00003){ inertiaRAF = requestAnimationFrame(step); }
+        else { inertiaRAF = null; }
+      }
+      inertiaRAF = requestAnimationFrame(step);
+    }
+
+    var markerEls = null;
+    var lastMarkerUpdate = 0;
+    var PIN_SCREEN_PX = 8; // desired constant on-screen radius
+    var PIN_STROKE_PX = 1.3;
+    function updateMarkerVisibility(){
+      if(!markerEls) markerEls = ctx.svg.querySelectorAll('.pin[data-bw]');
+      var rect = wrapEl.getBoundingClientRect();
+      if(!rect.width) return;
+      var scale = view.w/rect.width; // user-units per screen px
+      var r = PIN_SCREEN_PX * scale;
+      var sw = PIN_STROKE_PX * scale;
+      markerEls.forEach(function(el){
+        var bw = parseFloat(el.getAttribute('data-bw')||'0');
+        var screenSize = bw * (rect.width/view.w);
+        el.classList.toggle('marker-hidden', screenSize > 26);
+        el.setAttribute('r', r);
+        el.setAttribute('stroke-width', sw);
+      });
+    }
+    function applyView(){
+      ctx.svg.setAttribute('viewBox', view.x+' '+view.y+' '+view.w+' '+view.h);
+      var now = performance.now();
+      if(now-lastMarkerUpdate>80){ lastMarkerUpdate = now; updateMarkerVisibility(); }
+    }
+    function clampView(){
+      view.w = Math.max(minW, Math.min(maxW, view.w));
+      view.h = view.w * (initialView.h/initialView.w);
+      var maxX = worldBounds.x + worldBounds.w, maxY = worldBounds.y + worldBounds.h;
+      var minAllowedX = worldBounds.x - view.w*0.5, maxAllowedX = maxX - view.w*0.5;
+      var minAllowedY = worldBounds.y - view.h*0.5, maxAllowedY = maxY - view.h*0.5;
+      view.x = Math.max(Math.min(view.x, Math.max(minAllowedX,maxAllowedX)), Math.min(minAllowedX,maxAllowedX));
+      view.y = Math.max(Math.min(view.y, Math.max(minAllowedY,maxAllowedY)), Math.min(minAllowedY,maxAllowedY));
+    }
+    function screenToSVG(clientX, clientY){
+      var rect = wrapEl.getBoundingClientRect();
+      var px = (clientX-rect.left)/rect.width, py = (clientY-rect.top)/rect.height;
+      return { x: view.x + px*view.w, y: view.y + py*view.h };
+    }
+
+    function onDown(e){
+      if(e.target && e.target.closest && e.target.closest('.zoom-fit-btn')) return;
+      cancelInertia();
+      var now = Date.now();
+      if(Object.keys(pointers).length>0 && (now-lastActivity)>500){
+        // a previous gesture's pointerup/cancel was likely missed by iOS — self-heal instead of staying stuck
+        pointers = {}; dragStart = null; pinchStart = null; moved = false; tapInfo = null;
+      }
+      lastActivity = now;
+      wrapEl.setPointerCapture && wrapEl.setPointerCapture(e.pointerId);
+      pointers[e.pointerId] = { x:e.clientX, y:e.clientY };
+      var ids = Object.keys(pointers);
+      if(ids.length===1){
+        moved = false;
+        dragStart = { clientX:e.clientX, clientY:e.clientY, viewX:view.x, viewY:view.y };
+        tapInfo = { id:e.pointerId, x:e.clientX, y:e.clientY };
+        moveSamples = [{ t:performance.now(), x:view.x, y:view.y }];
+      } else if(ids.length===2){
+        dragStart = null;
+        var pts = ids.map(function(id){ return pointers[id]; });
+        var dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y) || 1;
+        var midX=(pts[0].x+pts[1].x)/2, midY=(pts[0].y+pts[1].y)/2;
+        pinchStart = { dist:dist, view:{x:view.x,y:view.y,w:view.w,h:view.h}, midSVG: screenToSVG(midX, midY) };
+      } else if(ids.length>2){
+        // more than two tracked pointers means stale entries snuck in — hard reset to just this one
+        pointers = {}; pointers[e.pointerId] = { x:e.clientX, y:e.clientY };
+        moved = false;
+        dragStart = { clientX:e.clientX, clientY:e.clientY, viewX:view.x, viewY:view.y };
+        tapInfo = { id:e.pointerId, x:e.clientX, y:e.clientY };
+        pinchStart = null;
+      }
+    }
+    function onMove(e){
+      if(!pointers[e.pointerId]) return;
+      lastActivity = Date.now();
+      pointers[e.pointerId] = { x:e.clientX, y:e.clientY };
+      var ids = Object.keys(pointers);
+      if(ids.length===1 && dragStart){
+        var dx = e.clientX-dragStart.clientX, dy = e.clientY-dragStart.clientY;
+        if(Math.abs(dx)>4 || Math.abs(dy)>4) moved = true;
+        var rect = wrapEl.getBoundingClientRect();
+        view.x = dragStart.viewX - (dx/rect.width)*view.w;
+        view.y = dragStart.viewY - (dy/rect.height)*view.h;
+        clampView();
+        applyView();
+        moveSamples.push({ t:performance.now(), x:view.x, y:view.y });
+        if(moveSamples.length>6) moveSamples.shift();
+      } else if(ids.length===2 && pinchStart){
+        moved = true;
+        var pts = ids.map(function(id){ return pointers[id]; });
+        var dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y) || 1;
+        var ratio = dist/pinchStart.dist;
+        var newW = pinchStart.view.w/ratio;
+        var midX=(pts[0].x+pts[1].x)/2, midY=(pts[0].y+pts[1].y)/2;
+        var rect = wrapEl.getBoundingClientRect();
+        var px = (midX-rect.left)/rect.width, py=(midY-rect.top)/rect.height;
+        view.w = newW; view.h = newW*(initialView.h/initialView.w);
+        view.x = pinchStart.midSVG.x - px*view.w;
+        view.y = pinchStart.midSVG.y - py*view.h;
+        clampView();
+        applyView();
+      }
+    }
+    function onUp(e){
+      lastActivity = Date.now();
+      var wasPinching = pinchStart !== null;
+      delete pointers[e.pointerId];
+      var ids = Object.keys(pointers);
+      if(ids.length<2) pinchStart = null;
+      if(ids.length===0){
+        var settledLongEnough = (performance.now() - lastPinchEndT) > 120;
+        if(tapInfo && !moved && tapInfo.id===e.pointerId && onTap){
+          var el = pickTappedCountry(tapInfo.x, tapInfo.y);
+          if(el && el.classList && el.classList.contains('country')) onTap(el);
+        } else if(moved && moveSamples.length>=2 && settledLongEnough){
+          var newest = moveSamples[moveSamples.length-1];
+          var oldest = moveSamples[0];
+          var dt = newest.t - oldest.t;
+          if(dt>=20 && dt<250){ // ignore near-instant samples: too likely sensor noise from a just-ended pinch, not intentional velocity
+            var vx = (newest.x-oldest.x)/dt, vy = (newest.y-oldest.y)/dt;
+            if(Math.hypot(vx,vy) > 0.00006) startInertia(vx, vy);
+          }
+        }
+        dragStart = null; tapInfo = null; moved = false; moveSamples = [];
+      } else if(ids.length===1){
+        var id = ids[0];
+        dragStart = { clientX:pointers[id].x, clientY:pointers[id].y, viewX:view.x, viewY:view.y };
+        moveSamples = []; // wipe any samples from before/during the pinch — start a clean baseline for the remaining finger
+        if(wasPinching){ lastPinchEndT = performance.now(); moved = false; }
+      }
+    }
+    function pickTappedCountry(clientX, clientY){
+      var rect = wrapEl.getBoundingClientRect();
+      var svgTap = screenToSVG(clientX, clientY);
+      var tolerancePx = 20;
+      var toleranceUser = tolerancePx * (view.w/rect.width);
+      var best = null, bestDist = Infinity;
+      var smalls = ctx.svg.querySelectorAll('.country[data-small="1"]');
+      smalls.forEach(function(el){
+        var screenSize = parseFloat(el.getAttribute('data-bw')||'0') * (rect.width/view.w);
+        if(screenSize >= 26) return; // already big enough on screen, no help needed
+        var cx = parseFloat(el.getAttribute('data-cx')), cy = parseFloat(el.getAttribute('data-cy'));
+        var dist = Math.hypot(cx-svgTap.x, cy-svgTap.y);
+        if(dist <= toleranceUser && dist < bestDist){ bestDist = dist; best = el; }
+      });
+      var direct = document.elementFromPoint(clientX, clientY);
+      if(direct && direct.classList && direct.classList.contains('pin') && !direct.classList.contains('marker-hidden')){
+        var byName = ctx.svg.querySelector('.country[data-name="'+CSS.escape(direct.getAttribute('data-name'))+'"]');
+        if(byName) return byName;
+      }
+      return best || direct;
+    }
+    wrapEl.addEventListener('pointerdown', onDown);
+    wrapEl.addEventListener('pointermove', onMove);
+    wrapEl.addEventListener('pointerup', onUp);
+    wrapEl.addEventListener('pointercancel', onUp);
+    wrapEl.addEventListener('lostpointercapture', onUp);
+    applyView();
+    return {
+      reset: function(){ cancelInertia(); view.x=initialView.x; view.y=initialView.y; view.w=initialView.w; view.h=initialView.h; applyView(); },
+      getView: function(){ return { x:view.x, y:view.y, w:view.w, h:view.h }; },
+      zoomBy: function(factor, cx, cy){
+        var anchor = cx!=null ? {x:cx,y:cy} : { x: view.x+view.w/2, y: view.y+view.h/2 };
+        var fx = (anchor.x-view.x)/view.w, fy = (anchor.y-view.y)/view.h;
+        view.w = view.w/factor; view.h = view.h/factor;
+        view.x = anchor.x - fx*view.w; view.y = anchor.y - fy*view.h;
+        clampView(); applyView();
+      }
+    };
+  }
+
+  function push(v){ nav.push(v); render(); }
+  function pop(){ nav.pop(); render(); }
+  function replaceTop(v){ nav[nav.length-1] = v; render(); }
+  function current(){ return nav[nav.length-1]; }
+
+  function esc(s){
+    var d = document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML;
+  }
+
+  function render(){
+    var top = current();
+    var topbar = document.getElementById('topbar');
+    var main = document.getElementById('main');
+    if(!state.loaded){
+      topbar.innerHTML = '<h1>Memory Catalog</h1>';
+      main.innerHTML = '<div class="loading">OPENING THE CABINET…</div>';
+      return;
+    }
+    if(!top || top.view==='home'){ renderHome(topbar, main); }
+    else if(top.view==='topic'){ renderTopic(topbar, main, top); }
+    else if(top.view==='learn'){ renderLearn(topbar, main, top); }
+    else if(top.view==='test'){ renderTest(topbar, main, top); }
+    else if(top.view==='deck'){ renderDeck(topbar, main, top); }
+    else if(top.view==='summary'){ renderSummary(topbar, main, top); }
+    else if(top.view==='mapexplore'){ renderMapExplore(topbar, main, top); }
+    else if(top.view==='maprecall'){ renderMapRecall(topbar, main, top); }
+  }
+
+  // ---------- HOME ----------
+  function renderHome(topbar, main){
+    topbar.innerHTML =
+      '<div style="flex:1"><h1>Memory Catalog</h1><div class="sub">' + state.topics.length + ' drawers on file</div></div>' +
+      '<button class="action" id="btnNewTopic">+</button>';
+    document.getElementById('btnNewTopic').onclick = function(){ openTopicSheet(null); };
+
+    var html = '<div class="view"><div class="cabinet-note">Tap a drawer to open it</div>';
+    if(state.topics.length===0){
+      html += '<div class="empty-note">The cabinet is empty. Add your first drawer to begin collecting facts.</div>';
+    }
+    state.topics.forEach(function(t){
+      var isMap = (t.type||'facts')==='map';
+      var due = dueCount(t);
+      var code = (t.name.slice(0,3).toUpperCase() || 'GEN');
+      var cardCount = isMap ? null : factsTopicCardCount(t);
+      var countLabel = isMap ? (mapEngine.features ? mapEngine.features.length+' countries' : 'atlas') : (hasDecks(t) ? t.decks.length+' subtopics' : cardCount+' cards');
+      html += '<div class="drawer" data-id="'+t.id+'" style="background:linear-gradient(180deg,'+t.color+' 0%, '+shade(t.color,-18)+' 100%)">' +
+        '<div class="pull"></div>' +
+        '<div class="label"><div class="code">'+code+'-'+(isMap?'ATL':String(cardCount).padStart(2,'0'))+'</div><div class="name">'+esc(t.name)+'</div></div>' +
+        '<div class="stats"><div class="count">'+countLabel+'</div><div class="due '+(due===0?'zero':'')+'">'+(due>0? due+' due today':'all caught up')+'</div></div>' +
+        '</div>';
+    });
+    html += '<button class="new-drawer-btn" id="btnNewTopic2">+ New Drawer</button></div>';
+    main.innerHTML = html;
+    document.getElementById('btnNewTopic2').onclick = function(){ openTopicSheet(null); };
+    main.querySelectorAll('.drawer').forEach(function(el){
+      el.onclick = function(){ push({view:'topic', topicId: el.getAttribute('data-id')}); };
+    });
+  }
+  function shade(hex, pct){
+    var n = parseInt(hex.slice(1),16);
+    var r = Math.max(0, Math.min(255, ((n>>16)&255) + pct));
+    var g = Math.max(0, Math.min(255, ((n>>8)&255) + pct));
+    var b = Math.max(0, Math.min(255, (n&255) + pct));
+    return 'rgb('+r+','+g+','+b+')';
+  }
+
+  function openTopicSheet(topicId){
+    var t = topicId ? topicById(topicId) : null;
+    var isMapTopic = t && (t.type||'facts')==='map';
+    var wrap = document.createElement('div');
+    wrap.className = 'overlay';
+    var langOpts = LANG_OPTIONS.map(function(o){
+      var sel = (t && t.lang===o[0]) || (!t && o[0]==='') ? ' selected' : '';
+      return '<option value="'+o[0]+'"'+sel+'>'+o[1]+'</option>';
+    }).join('');
+    var orderOpts = CARD_ORDER_OPTIONS.map(function(o){
+      var sel = (t ? (t.cardOrder||'prompt') : 'prompt')===o[0] ? ' selected' : '';
+      return '<option value="'+o[0]+'"'+sel+'>'+o[1]+'</option>';
+    }).join('');
+    wrap.innerHTML =
+      '<div class="sheet">' +
+      '<h3>'+(t? 'Edit Drawer' : 'New Drawer')+'</h3>' +
+      (t? '' : '<div class="field"><label>Type</label><div class="type-toggle" id="typeToggle">' +
+        '<button type="button" class="selected" data-type="facts">Facts (Q&amp;A)</button>' +
+        '<button type="button" data-type="map">World Map</button>' +
+        '</div></div>') +
+      '<div class="field"><label>Topic name</label><input id="tName" type="text" value="'+(t?esc(t.name):'')+'" placeholder="e.g. History"></div>' +
+      '<div class="field"><label>Color</label><div class="swatches" id="swatches"></div></div>' +
+      (isMapTopic ? '' :
+        '<div class="field" id="fLangField"><label>Pronunciation voice</label><select id="tLang">'+langOpts+'</select></div>' +
+        '<div class="field" id="fOrderField"><label>Card order</label><select id="tOrder">'+orderOpts+'</select></div>'
+      ) +
+      '<div class="sheet-actions">' +
+      (t? '<button class="delete" id="tDelete">Delete</button>' : '') +
+      '<button class="cancel" id="tCancel">Cancel</button>' +
+      '<button class="save" id="tSave">Save</button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    var chosenType = 'facts';
+    if(!t){
+      var toggle = wrap.querySelector('#typeToggle');
+      toggle.querySelectorAll('button').forEach(function(b){
+        b.onclick = function(){
+          chosenType = b.getAttribute('data-type');
+          toggle.querySelectorAll('button').forEach(function(x){ x.classList.remove('selected'); });
+          b.classList.add('selected');
+          var nameInput = wrap.querySelector('#tName');
+          if(chosenType==='map' && !nameInput.value.trim()) nameInput.value = 'World Map';
+          var lf = wrap.querySelector('#fLangField'), of = wrap.querySelector('#fOrderField');
+          if(lf) lf.style.display = chosenType==='map' ? 'none' : '';
+          if(of) of.style.display = chosenType==='map' ? 'none' : '';
+        };
+      });
+    }
+    var chosen = t ? t.color : COLORS[state.topics.length % COLORS.length];
+    var sw = wrap.querySelector('#swatches');
+    COLORS.forEach(function(c){
+      var s = document.createElement('div');
+      s.className = 'swatch' + (c===chosen?' selected':'');
+      s.style.background = c;
+      s.onclick = function(){
+        chosen = c;
+        sw.querySelectorAll('.swatch').forEach(function(x){ x.classList.remove('selected'); });
+        s.classList.add('selected');
+      };
+      sw.appendChild(s);
+    });
+    wrap.querySelector('#tCancel').onclick = function(){ wrap.remove(); };
+    if(t){
+      wrap.querySelector('#tDelete').onclick = function(){
+        state.topics = state.topics.filter(function(x){ return x.id!==t.id; });
+        saveData();
+        wrap.remove();
+        nav = [];
+        render();
+      };
+    }
+    wrap.querySelector('#tSave').onclick = function(){
+      var name = wrap.querySelector('#tName').value.trim();
+      if(!name) return;
+      var langEl = wrap.querySelector('#tLang'), orderEl = wrap.querySelector('#tOrder');
+      if(t){
+        t.name = name; t.color = chosen;
+        if(!isMapTopic){ t.lang = langEl?langEl.value:''; t.cardOrder = orderEl?orderEl.value:'prompt'; }
+      }
+      else if(chosenType==='map'){
+        state.topics.push({ id: uid(), name:name, type:'map', mapId:'world', color:chosen, progress:{} });
+        loadMapData().then(render);
+      }
+      else {
+        state.topics.push({ id: uid(), name:name, type:'facts', color:chosen, lang: langEl?langEl.value:'', cardOrder: orderEl?orderEl.value:'prompt', facts:[] });
+      }
+      saveData();
+      wrap.remove();
+      render();
+    };
+  }
+
+  // ---------- TOPIC ----------
+  function renderTopic(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    if((t.type||'facts')==='map'){ renderMapTopic(topbar, main, top, t); return; }
+    if(hasDecks(t)){ renderDeckList(topbar, main, top, t); return; }
+    var due = dueCount(t);
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+esc(t.name)+'</h1><div class="sub">'+t.facts.length+' cards on file</div></div>' +
+      '<button class="action" id="btnEditTopic">✎</button>';
+    document.getElementById('btnBack').onclick = pop;
+    document.getElementById('btnEditTopic').onclick = function(){ openTopicSheet(t.id); };
+
+    var html = '<div class="view">';
+    html += '<div class="mode-buttons">' +
+      '<button class="mode-btn learn" id="btnLearn"><span class="big">Learn</span><span class="small">Browse all cards</span></button>' +
+      '<button class="mode-btn test" id="btnTest"><span class="big">Test</span><span class="small">'+(due>0? due+' due today' : 'review anyway')+'</span></button>' +
+      '</div>';
+    html += '<div class="section-label"><span>Cards</span></div>';
+    if(t.facts.length===0){
+      html += '<div class="empty-note">No cards yet. Add the first fact for this drawer.</div>';
+    }
+    t.facts.forEach(function(f){
+      var dots = '';
+      for(var i=1;i<=5;i++){ dots += '<span class="'+(i<=f.box?'filled':'')+'"></span>'; }
+      html += '<div class="fact-row" data-id="'+f.id+'"><div class="q">'+esc(f.q)+'</div><div class="box-dots">'+dots+'</div></div>';
+    });
+    html += '<button class="add-fact-btn" id="btnAddFact">+ Add Card</button>';
+    html += '<button class="add-fact-btn" id="btnBulkImport" style="margin-top:8px;">⇪ Bulk Import Vocabulary</button>';
+    html += '<button class="add-fact-btn" id="btnAddSubtopic" style="margin-top:8px;">+ Add Subtopic</button>';
+    html += '</div>';
+    main.innerHTML = html;
+
+    document.getElementById('btnLearn').onclick = function(){
+      if(t.facts.length===0){ openFactSheet(t, null); return; }
+      push({view:'learn', topicId:t.id, factIndex:0});
+    };
+    document.getElementById('btnTest').onclick = function(){
+      if(t.facts.length===0){ openFactSheet(t, null); return; }
+      var pool = t.facts.filter(function(f){ return f.nextReview <= todayStr(); });
+      if(pool.length===0) pool = t.facts.slice();
+      shuffle(pool);
+      push({view:'test', topicId:t.id, queue: pool.map(function(f){return f.id;}), idx:0, revealed:false, correct:0, missed:0});
+    };
+    document.getElementById('btnAddFact').onclick = function(){ openFactSheet(t, null); };
+    document.getElementById('btnBulkImport').onclick = function(){ openBulkImportSheet(t); };
+    document.getElementById('btnAddSubtopic').onclick = function(){ openSubtopicSheet(t, null); };
+    main.querySelectorAll('.fact-row').forEach(function(el){
+      el.onclick = function(){ openFactSheet(t, el.getAttribute('data-id')); };
+    });
+  }
+
+  function hasDecks(t){ return !!(t.decks && t.decks.length); }
+  function deckById(t, id){ return (t.decks||[]).find(function(d){ return d.id===id; }); }
+  function factsTopicCardCount(t){
+    return hasDecks(t) ? t.decks.reduce(function(s,d){ return s+d.facts.length; }, 0) : t.facts.length;
+  }
+
+  function renderDeckList(topbar, main, top, t){
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+esc(t.name)+'</h1><div class="sub">'+t.decks.length+' subtopics</div></div>' +
+      '<button class="action" id="btnEditTopic">✎</button>';
+    document.getElementById('btnBack').onclick = pop;
+    document.getElementById('btnEditTopic').onclick = function(){ openTopicSheet(t.id); };
+
+    var html = '<div class="view"><div class="section-label"><span>Subtopics</span></div>';
+    t.decks.forEach(function(d){
+      var todayT = todayStr();
+      var due = d.facts.filter(function(f){ return f.nextReview<=todayT; }).length;
+      html += '<div class="fact-row" data-id="'+d.id+'" style="cursor:pointer;">' +
+        '<div class="q" style="font-family:var(--font-display); font-weight:600;">'+esc(d.name)+'</div>' +
+        '<div style="font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft); text-align:right; flex-shrink:0;">'+d.facts.length+' cards<br>'+(due>0? due+' due':'caught up')+'</div>' +
+        '</div>';
+    });
+    html += '<button class="add-fact-btn" id="btnAddSubtopic">+ New Subtopic</button></div>';
+    main.innerHTML = html;
+
+    document.getElementById('btnAddSubtopic').onclick = function(){ openSubtopicSheet(t, null); };
+    main.querySelectorAll('.fact-row').forEach(function(el){
+      el.onclick = function(){ push({view:'deck', topicId:t.id, deckId: el.getAttribute('data-id')}); };
+    });
+  }
+
+  function openSubtopicSheet(t, deckId){
+    var d = deckId ? deckById(t, deckId) : null;
+    var wrap = document.createElement('div');
+    wrap.className = 'overlay';
+    var langOpts = LANG_OPTIONS.map(function(o){
+      var sel = (d && d.lang===o[0]) || (!d && o[0]==='') ? ' selected' : '';
+      return '<option value="'+o[0]+'"'+sel+'>'+o[1]+'</option>';
+    }).join('');
+    var orderOpts = CARD_ORDER_OPTIONS.map(function(o){
+      var sel = (d ? (d.cardOrder||'prompt') : 'prompt')===o[0] ? ' selected' : '';
+      return '<option value="'+o[0]+'"'+sel+'>'+o[1]+'</option>';
+    }).join('');
+    wrap.innerHTML =
+      '<div class="sheet">' +
+      '<h3>'+(d? 'Edit Subtopic' : 'New Subtopic')+'</h3>' +
+      '<div class="field"><label>Subtopic name</label><input id="dName" type="text" value="'+(d?esc(d.name):'')+'" placeholder="e.g. German"></div>' +
+      '<div class="field"><label>Pronunciation voice</label><select id="dLang">'+langOpts+'</select></div>' +
+      '<div class="field"><label>Card order</label><select id="dOrder">'+orderOpts+'</select></div>' +
+      '<div class="sheet-actions">' +
+      (d? '<button class="delete" id="dDelete">Delete</button>' : '') +
+      '<button class="cancel" id="dCancel">Cancel</button>' +
+      '<button class="save" id="dSave">Save</button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    wrap.querySelector('#dCancel').onclick = function(){ wrap.remove(); };
+    if(d){
+      wrap.querySelector('#dDelete').onclick = function(){
+        t.decks = t.decks.filter(function(x){ return x.id!==d.id; });
+        saveData(); wrap.remove();
+        nav = nav.filter(function(n){ return n.deckId !== d.id; });
+        render();
+      };
+    }
+    wrap.querySelector('#dSave').onclick = function(){
+      var name = wrap.querySelector('#dName').value.trim();
+      var lang = wrap.querySelector('#dLang').value;
+      var cardOrder = wrap.querySelector('#dOrder').value;
+      if(!name) return;
+      if(d){ d.name = name; d.lang = lang; d.cardOrder = cardOrder; }
+      else {
+        if(!t.decks){
+          t.decks = [];
+          if(t.facts && t.facts.length){ t.decks.push({ id: uid(), name:'General', lang:'', cardOrder:'prompt', facts:t.facts }); t.facts = []; }
+        }
+        t.decks.push({ id: uid(), name:name, lang:lang, cardOrder:cardOrder, facts:[] });
+      }
+      saveData(); wrap.remove(); render();
+    };
+  }
+
+  function renderDeck(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    var d = deckById(t, top.deckId);
+    if(!d){ pop(); return; }
+    var due = d.facts.filter(function(f){ return f.nextReview<=todayStr(); }).length;
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+esc(d.name)+'</h1><div class="sub">'+esc(t.name)+' · '+d.facts.length+' cards</div></div>' +
+      '<button class="action" id="btnEditDeck">✎</button>';
+    document.getElementById('btnBack').onclick = pop;
+    document.getElementById('btnEditDeck').onclick = function(){ openSubtopicSheet(t, d.id); };
+
+    var html = '<div class="view">';
+    html += '<div class="mode-buttons">' +
+      '<button class="mode-btn learn" id="btnLearn"><span class="big">Learn</span><span class="small">Browse all cards</span></button>' +
+      '<button class="mode-btn test" id="btnTest"><span class="big">Test</span><span class="small">'+(due>0? due+' due today' : 'review anyway')+'</span></button>' +
+      '</div>';
+    html += '<div class="section-label"><span>Cards</span></div>';
+    if(d.facts.length===0){
+      html += '<div class="empty-note">No cards yet. Add the first fact for this subtopic.</div>';
+    }
+    d.facts.forEach(function(f){
+      var dots = '';
+      for(var i=1;i<=5;i++){ dots += '<span class="'+(i<=f.box?'filled':'')+'"></span>'; }
+      html += '<div class="fact-row" data-id="'+f.id+'"><div class="q">'+esc(f.q)+'</div><div class="box-dots">'+dots+'</div></div>';
+    });
+    html += '<button class="add-fact-btn" id="btnAddFact">+ Add Card</button>';
+    html += '<button class="add-fact-btn" id="btnBulkImport" style="margin-top:8px;">⇪ Bulk Import Vocabulary</button></div>';
+    main.innerHTML = html;
+
+    document.getElementById('btnLearn').onclick = function(){
+      if(d.facts.length===0){ openFactSheet(d, null); return; }
+      push({view:'learn', topicId:t.id, deckId:d.id, factIndex:0});
+    };
+    document.getElementById('btnBulkImport').onclick = function(){ openBulkImportSheet(d); };
+    document.getElementById('btnTest').onclick = function(){
+      if(d.facts.length===0){ openFactSheet(d, null); return; }
+      var pool = d.facts.filter(function(f){ return f.nextReview <= todayStr(); });
+      if(pool.length===0) pool = d.facts.slice();
+      shuffle(pool);
+      push({view:'test', topicId:t.id, deckId:d.id, queue: pool.map(function(f){return f.id;}), idx:0, revealed:false, correct:0, missed:0});
+    };
+    document.getElementById('btnAddFact').onclick = function(){ openFactSheet(d, null); };
+    main.querySelectorAll('.fact-row').forEach(function(el){
+      el.onclick = function(){ openFactSheet(d, el.getAttribute('data-id')); };
+    });
+  }
+
+  function shuffle(arr){
+    for(var i=arr.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var tmp=arr[i]; arr[i]=arr[j]; arr[j]=tmp; }
+  }
+
+  // ---------- MAP TOPIC ----------
+  function openMapDiagnostics(){
+    var wrap = document.createElement('div');
+    wrap.className = 'overlay';
+    var logText = mapEngine.log.length ? mapEngine.log.join('\n') : '(no log yet — try reloading the atlas)';
+    var kzOk = mapEngine.features && mapEngine.features.some(function(f){ return f.properties.name==='Kazakhstan'; });
+    var ilOk = mapEngine.features && mapEngine.features.some(function(f){ return f.properties.name==='Israel'; });
+    var psOk = mapEngine.features && mapEngine.features.some(function(f){ return f.properties.name==='Palestine'; });
+    wrap.innerHTML =
+      '<div class="sheet">' +
+      '<h3>Map Data Diagnostics</h3>' +
+      '<p style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); margin:-6px 0 12px;">' +
+      'Kazakhstan loaded: '+(kzOk?'yes':'NO')+' · Israel loaded: '+(ilOk?'yes':'NO')+' · Palestine loaded: '+(psOk?'yes':'NO')+
+      '</p>' +
+      '<div class="field"><label>Load log (copy this to report an issue)</label><textarea readonly style="min-height:220px; font-family:var(--font-mono); font-size:10.5px;">'+esc(logText)+'</textarea></div>' +
+      '<div class="sheet-actions">' +
+      '<button class="cancel" id="diagClose">Close</button>' +
+      '<button class="save" id="diagReload">Reload Atlas</button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    wrap.querySelector('#diagClose').onclick = function(){ wrap.remove(); };
+    wrap.querySelector('#diagReload').onclick = function(){
+      mapEngine.features = null; mapEngine.error = null; mapEngine.promise = null; mapEngine.log = [];
+      wrap.remove(); render();
+    };
+  }
+
+  function renderMapTopic(topbar, main, top, t){
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+esc(t.name)+'</h1><div class="sub">World atlas</div></div>' +
+      '<button class="action" id="btnDiag" title="Diagnostics" style="font-size:14px;">ⓘ</button>' +
+      '<button class="action" id="btnEditTopic">✎</button>';
+    document.getElementById('btnBack').onclick = pop;
+    document.getElementById('btnEditTopic').onclick = function(){ openTopicSheet(t.id); };
+    document.getElementById('btnDiag').onclick = function(){ openMapDiagnostics(); };
+
+    if(!mapEngine.features && !mapEngine.error){
+      main.innerHTML = '<div class="view"><div class="loading">UNROLLING THE ATLAS…</div></div>';
+      loadMapData().then(function(){ if(current()===top) render(); });
+      return;
+    }
+    if(mapEngine.error){
+      main.innerHTML = '<div class="view"><div class="map-error">The atlas data couldn\'t be loaded. This needs an internet connection the first time it opens.' +
+        '<br><span style="font-family:var(--font-mono); font-size:10.5px; opacity:0.7;">('+esc(mapEngine.error.message||String(mapEngine.error))+')</span>' +
+        '<br><button id="btnRetry">Try Again</button></div></div>';
+      document.getElementById('btnRetry').onclick = function(){ mapEngine.error=null; mapEngine.promise=null; render(); };
+      return;
+    }
+
+    var category = t.lastCategory || 'World';
+    var scoped = categoryFeatures(category);
+    var progress = t.progress || {};
+    var total = scoped.length;
+    var explored = scoped.filter(function(f){ return !!progress[f.properties.name]; }).length;
+    var mastered = scoped.filter(function(f){ var p = progress[f.properties.name]; return p && p.box>=5; }).length;
+    var due = dueCount(t, category);
+
+    var html = '<div class="view">';
+    html += '<div class="cat-scroll" id="catScroll">';
+    MAP_CATEGORIES.forEach(function(c){
+      html += '<button class="cat-chip '+(c===category?'selected':'')+'" data-cat="'+esc(c)+'">'+esc(c)+'</button>';
+    });
+    html += '</div>';
+    html += '<div class="map-stat-grid">' +
+      '<div class="map-stat"><div class="n">'+explored+'/'+total+'</div><div class="l">Explored</div></div>' +
+      '<div class="map-stat"><div class="n">'+mastered+'</div><div class="l">Mastered</div></div>' +
+      '<div class="map-stat"><div class="n">'+due+'</div><div class="l">Due today</div></div>' +
+      '</div>';
+    html += '<div class="mode-buttons triple" style="margin-top:16px;">' +
+      '<button class="mode-btn explore" id="btnExplore"><span class="txt"><span class="big">Explore</span><span class="small">Tap countries to learn names</span></span></button>' +
+      '<button class="mode-btn locate" id="btnLocate"><span class="txt"><span class="big">Recall: Locate</span><span class="small">See a name, tap the map</span></span></button>' +
+      '<button class="mode-btn name" id="btnName"><span class="txt"><span class="big">Recall: Name</span><span class="small">See a shape, type the name</span></span></button>' +
+      '</div></div>';
+    main.innerHTML = html;
+
+    main.querySelectorAll('.cat-chip').forEach(function(el){
+      el.onclick = function(){ t.lastCategory = el.getAttribute('data-cat'); saveData(); render(); };
+    });
+    document.getElementById('btnExplore').onclick = function(){
+      push({view:'mapexplore', topicId:t.id, category:category});
+    };
+    document.getElementById('btnLocate').onclick = function(){
+      var queue = buildMapQueue(t, category);
+      if(queue.length===0) return;
+      push({view:'maprecall', topicId:t.id, mode:'locate', category:category, queue:queue, idx:0, revealed:false, correct:0, missed:0});
+    };
+    document.getElementById('btnName').onclick = function(){
+      var queue = buildMapQueue(t, category);
+      if(queue.length===0) return;
+      push({view:'maprecall', topicId:t.id, mode:'name', category:category, queue:queue, idx:0, revealed:false, correct:0, missed:0});
+    };
+  }
+
+  function mapStageMarkup(bannerHtml, extraHtml){
+    return '<div class="view map-stage">' + bannerHtml +
+      '<div class="map-svg-wrap" id="svgWrap"><button class="zoom-fit-btn" id="btnFit">⤢ Fit</button></div>' +
+      (extraHtml||'') + '</div>';
+  }
+
+  function renderMapExplore(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    var category = top.category || 'World';
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>Explore · '+esc(category)+'</h1><div class="sub">Pinch to zoom, drag to pan</div></div>';
+    document.getElementById('btnBack').onclick = pop;
+
+    main.innerHTML = mapStageMarkup(
+      '<div class="map-banner"><div class="prompt" id="banterName">Tap a country to see its name</div><div class="meta" id="banterCode"></div></div>'
+    );
+
+    var wrap = document.getElementById('svgWrap');
+    var ctx = buildMapSVG(mapEngine.features, {
+      getFill: function(f){
+        var inScope = categoryContains(category, f);
+        var p = (t.progress||{})[f.properties.name];
+        if(!inScope) return '#B7AF9A';
+        return p ? '#A7BE9F' : null;
+      },
+      getOpacity: function(f){ return categoryContains(category, f) ? 1 : 0.45; }
+    }, MAP_CATEGORY_CENTER[category]);
+    wrap.insertBefore(ctx.svg, wrap.firstChild);
+    var worldBounds = boundsForFeatures(ctx, mapEngine.features, 0.03);
+    var initView = aspectFit(boundsForFeatures(ctx, categoryFeatures(category), 0.15), wrap.getBoundingClientRect());
+    var lastPath = null;
+    var pz = attachPanZoom(wrap, ctx, initView, worldBounds, function(pathEl){
+      if(lastPath === pathEl){
+        lastPath.classList.remove('target');
+        lastPath = null;
+        document.getElementById('banterName').textContent = 'Tap a country to see its name';
+        document.getElementById('banterCode').textContent = '';
+        return;
+      }
+      if(lastPath) lastPath.classList.remove('target');
+      pathEl.classList.add('target');
+      lastPath = pathEl;
+      var name = pathEl.getAttribute('data-name');
+      ensureCountryProgress(t, name);
+      saveData();
+      document.getElementById('banterName').textContent = name;
+      var p = t.progress[name];
+      document.getElementById('banterCode').textContent = 'BOX ' + p.box + ' OF 5';
+    });
+    document.getElementById('btnFit').onclick = function(){ pz.reset(); };
+  }
+
+  function categoryContains(category, f){
+    return !category || category==='World' || featureCategory(f)===category;
+  }
+
+  function renderMapRecall(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    if(top.idx >= top.queue.length){
+      replaceTop({view:'summary', topicId:t.id, correct:top.correct, missed:top.missed, total:top.queue.length});
+      return;
+    }
+    var category = top.category || 'World';
+    var targetName = top.queue[top.idx];
+    var isLocate = top.mode==='locate';
+    var modeLabel = isLocate ? 'Recall: Locate' : 'Recall: Name';
+
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>'+modeLabel+' · '+esc(category)+'</h1><div class="sub">'+(top.idx+1)+' of '+top.queue.length+'</div></div>';
+    document.getElementById('btnBack').onclick = pop;
+
+    var bannerHtml;
+    if(isLocate){
+      bannerHtml = '<div class="map-banner"><div class="prompt">Find: '+esc(targetName)+'</div><div class="meta">'+(top.revealed?'':'tap the map')+'</div></div>';
+    } else {
+      bannerHtml = '<div class="map-banner"><div class="prompt">'+(top.revealed? 'Answer: '+esc(targetName) : 'Name this country')+'</div><div class="meta"></div></div>';
+    }
+    var extraHtml = '';
+    if(top.revealed){
+      extraHtml += '<div class="map-feedback-banner '+(top.lastCorrect?'correct':'wrong')+'">'+(top.lastCorrect?'Correct':'Missed it — '+esc(targetName))+'</div>';
+      extraHtml += '<div class="map-next-row"><button id="btnNext">Next Card ›</button></div>';
+    } else if(!isLocate){
+      extraHtml += '<div class="name-input-row"><input id="nameInput" type="text" autocomplete="off" autocapitalize="words" placeholder="Type the country name"><button id="btnSubmit">Check</button></div>';
+    }
+    main.innerHTML = mapStageMarkup(bannerHtml, extraHtml);
+
+    var wrap = document.getElementById('svgWrap');
+    var ctx = buildMapSVG(mapEngine.features, {
+      getFill: function(f){
+        var inScope = categoryContains(category, f);
+        if(!inScope) return '#B7AF9A';
+        return null;
+      },
+      getOpacity: function(f){ return categoryContains(category, f) ? 1 : 0.4; }
+    }, MAP_CATEGORY_CENTER[category]);
+    wrap.insertBefore(ctx.svg, wrap.firstChild);
+    var worldBounds = boundsForFeatures(ctx, mapEngine.features, 0.03);
+    var targetFeature = mapEngine.features.find(function(f){ return f.properties.name===targetName; });
+    var initView = top.savedView
+      ? top.savedView
+      : aspectFit((!isLocate && targetFeature) ? boundsForFeatures(ctx, [targetFeature], 3) : boundsForFeatures(ctx, categoryFeatures(category), 0.15), wrap.getBoundingClientRect());
+
+    if(!isLocate){
+      var targetPath = ctx.svg.querySelector('path[data-name="'+CSS.escape(targetName)+'"]');
+      if(targetPath){
+        if(top.revealed) targetPath.classList.add(top.lastCorrect?'correct':'wrong');
+        else targetPath.classList.add('target');
+      }
+    }
+
+    var pz = attachPanZoom(wrap, ctx, initView, worldBounds, (isLocate && !top.revealed) ? function(pathEl){
+      var name = pathEl.getAttribute('data-name');
+      var correct = name === targetName;
+      pathEl.classList.add(correct?'correct':'wrong');
+      if(!correct){
+        var truePath = ctx.svg.querySelector('path[data-name="'+CSS.escape(targetName)+'"]');
+        if(truePath) truePath.classList.add('reveal');
+      }
+      gradeCountry(t, targetName, correct);
+      replaceTop(Object.assign({}, top, {
+        revealed:true, lastCorrect:correct, savedView: pz.getView(),
+        correct: top.correct + (correct?1:0), missed: top.missed + (correct?0:1)
+      }));
+    } : null);
+    document.getElementById('btnFit').onclick = function(){ pz.reset(); };
+
+    if(!isLocate && !top.revealed){
+      var input = document.getElementById('nameInput');
+      var submit = function(){
+        var val = input.value.trim();
+        if(!val) return;
+        var correct = nameMatches(val, targetName);
+        gradeCountry(t, targetName, correct);
+        replaceTop(Object.assign({}, top, {
+          revealed:true, lastCorrect:correct, savedView: pz.getView(),
+          correct: top.correct + (correct?1:0), missed: top.missed + (correct?0:1)
+        }));
+      };
+      document.getElementById('btnSubmit').onclick = submit;
+      input.addEventListener('keydown', function(e){ if(e.key==='Enter') submit(); });
+      setTimeout(function(){ input.focus(); }, 50);
+    }
+    if(top.revealed){
+      document.getElementById('btnNext').onclick = function(){
+        replaceTop(Object.assign({}, top, {
+          idx: top.idx+1, revealed:false, lastCorrect:undefined,
+          savedView: isLocate ? pz.getView() : null
+        }));
+      };
+    }
+  }
+
+  function parseVocabLine(line){
+    var parts;
+    if(line.indexOf('\t')!==-1) parts = line.split('\t');
+    else if(line.indexOf(',')!==-1) parts = splitCSVLine(line);
+    else if(line.indexOf(' - ')!==-1) parts = line.split(' - ');
+    else if(line.indexOf(';')!==-1) parts = line.split(';');
+    else return null;
+    parts = parts.map(function(p){ return p.trim().replace(/^"(.*)"$/,'$1').trim(); });
+    if(!parts[0] || !parts[1]) return null;
+    return { q: parts[0], a: parts[1], example: parts[2]||'', exampleTranslation: parts[3]||'' };
+  }
+  function splitCSVLine(line){
+    var result = [], cur = '', inQuotes = false;
+    for(var i=0;i<line.length;i++){
+      var ch = line[i];
+      if(ch==='"'){ inQuotes = !inQuotes; }
+      else if(ch===',' && !inQuotes){ result.push(cur); cur=''; }
+      else cur += ch;
+    }
+    result.push(cur);
+    return result;
+  }
+  function openBulkImportSheet(container){
+    var wrap = document.createElement('div');
+    wrap.className = 'overlay';
+    wrap.innerHTML =
+      '<div class="sheet">' +
+      '<h3>Bulk Import Vocabulary</h3>' +
+      '<p style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); line-height:1.5; margin:-6px 0 14px;">One entry per line: <b>word, translation</b> or <b>word, translation, example sentence, example translation</b>. Works with commas, tabs, semicolons, or " - ". Paste text below, or upload a .csv/.txt file.</p>' +
+      '<div class="field"><label>Upload file</label><input id="bFile" type="file" accept=".csv,.txt,text/csv,text/plain"></div>' +
+      '<div class="field"><label>Or paste text</label><textarea id="bText" style="min-height:140px;" placeholder="Hund, dog, Der Hund läuft schnell., The dog runs fast.\nKatze, cat"></textarea></div>' +
+      '<div id="bPreview" style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); margin-bottom:10px;"></div>' +
+      '<div class="sheet-actions">' +
+      '<button class="cancel" id="bCancel">Cancel</button>' +
+      '<button class="save" id="bImport">Import</button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    var textarea = wrap.querySelector('#bText');
+    var preview = wrap.querySelector('#bPreview');
+    function updatePreview(){
+      var lines = textarea.value.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
+      var parsed = lines.map(parseVocabLine).filter(Boolean);
+      preview.textContent = lines.length ? (parsed.length + ' of ' + lines.length + ' lines recognized') : '';
+    }
+    textarea.addEventListener('input', updatePreview);
+    wrap.querySelector('#bFile').addEventListener('change', function(e){
+      var file = e.target.files[0];
+      if(!file) return;
+      var reader = new FileReader();
+      reader.onload = function(){
+        textarea.value = String(reader.result||'');
+        updatePreview();
+      };
+      reader.readAsText(file);
+    });
+    wrap.querySelector('#bCancel').onclick = function(){ wrap.remove(); };
+    wrap.querySelector('#bImport').onclick = function(){
+      var lines = textarea.value.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
+      var parsed = lines.map(parseVocabLine).filter(Boolean);
+      if(parsed.length===0) return;
+      parsed.forEach(function(r){ container.facts.push(mkFact(r.q, r.a, r.example, r.exampleTranslation)); });
+      saveData(); wrap.remove(); render();
+    };
+  }
+
+  function openFactSheet(topic, factId){
+    var f = factId ? factById(topic, factId) : null;
+    var wrap = document.createElement('div');
+    wrap.className = 'overlay';
+    wrap.innerHTML =
+      '<div class="sheet">' +
+      '<h3>'+(f? 'Edit Card' : 'New Card')+'</h3>' +
+      '<div class="field"><label>Question / prompt</label><textarea id="fQ" placeholder="What do you want to remember?">'+(f?esc(f.q):'')+'</textarea></div>' +
+      '<div class="field"><label>Answer</label><textarea id="fA" placeholder="The fact or answer">'+(f?esc(f.a):'')+'</textarea></div>' +
+      '<div class="field"><label>Example sentence (optional)</label><textarea id="fEx" placeholder="Used in a sentence">'+(f?esc(f.example||''):'')+'</textarea></div>' +
+      '<div class="field"><label>Example sentence translation (optional)</label><textarea id="fExT" placeholder="Translation of the example">'+(f?esc(f.exampleTranslation||''):'')+'</textarea></div>' +
+      '<div class="sheet-actions">' +
+      (f? '<button class="delete" id="fDelete">Delete</button>' : '') +
+      '<button class="cancel" id="fCancel">Cancel</button>' +
+      '<button class="save" id="fSave">Save</button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    wrap.querySelector('#fCancel').onclick = function(){ wrap.remove(); };
+    if(f){
+      wrap.querySelector('#fDelete').onclick = function(){
+        topic.facts = topic.facts.filter(function(x){ return x.id!==f.id; });
+        saveData(); wrap.remove(); render();
+      };
+    }
+    wrap.querySelector('#fSave').onclick = function(){
+      var q = wrap.querySelector('#fQ').value.trim();
+      var a = wrap.querySelector('#fA').value.trim();
+      var ex = wrap.querySelector('#fEx').value.trim();
+      var exT = wrap.querySelector('#fExT').value.trim();
+      if(!q || !a) return;
+      if(f){ f.q=q; f.a=a; f.example=ex; f.exampleTranslation=exT; }
+      else { topic.facts.push(mkFact(q,a,ex,exT)); }
+      saveData(); wrap.remove(); render();
+    };
+  }
+
+  function faceMarkup(text, hint, lang, example, showAudio){
+    var speakBtn = showAudio ? '<button class="speak-btn" data-say="'+esc(text)+'" data-lang="'+esc(lang||'')+'">🔊</button>' : '';
+    var exampleHtml = example ? ('<div class="example">'+esc(example)+(showAudio?(' <button class="speak-btn small" data-say="'+esc(example)+'" data-lang="'+esc(lang||'')+'">🔊</button>'):'')+'</div>') : '';
+    return '<div class="content-wrap"><div class="content">'+esc(text)+'</div>'+speakBtn+'</div>'+exampleHtml+'<div class="hint">'+hint+'</div>';
+  }
+  var RANDOM_SWAP_CACHE = {};
+  function cardIsSwapped(container, factId){
+    var order = container.cardOrder || 'prompt';
+    if(order==='answer') return true;
+    if(order==='random'){
+      var key = (container.id||'x') + ':' + factId;
+      if(!(key in RANDOM_SWAP_CACHE)) RANDOM_SWAP_CACHE[key] = Math.random()<0.5;
+      return RANDOM_SWAP_CACHE[key];
+    }
+    return false;
+  }
+  function wireSpeakButtons(root){
+    root.querySelectorAll('.speak-btn').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        speak(btn.getAttribute('data-say'), btn.getAttribute('data-lang'));
+      });
+    });
+  }
+
+  // ---------- LEARN ----------
+  function renderLearn(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    var container = top.deckId ? deckById(t, top.deckId) : t;
+    if(!container){ pop(); return; }
+    var f = container.facts[top.factIndex];
+    var lang = container.lang || '';
+    var swapped = cardIsSwapped(container, f.id);
+    var label = top.deckId ? (esc(t.name)+' · '+esc(container.name)) : esc(t.name);
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>Learn · '+label+'</h1><div class="sub">Browsing mode</div></div>';
+    document.getElementById('btnBack').onclick = pop;
+
+    var frontText = swapped ? f.a : f.q, frontEx = swapped ? f.exampleTranslation : f.example, frontAudio = !swapped;
+    var backText = swapped ? f.q : f.a, backEx = swapped ? f.example : f.exampleTranslation, backAudio = swapped;
+    var html = '<div class="view stage">';
+    html += '<div class="progress-line"><span>CARD '+(top.factIndex+1)+' OF '+container.facts.length+'</span><span>TAP CARD TO FLIP</span></div>';
+    html += '<div class="flip-card" id="flipCard"><div class="flip-inner" id="flipInner">' +
+      '<div class="face front"><div class="kicker">'+(swapped?'Answer':'Prompt')+'</div>'+faceMarkup(frontText, 'tap to reveal', lang, frontEx, frontAudio)+'</div>' +
+      '<div class="face back"><div class="kicker">'+(swapped?'Prompt':'Answer')+'</div>'+faceMarkup(backText, 'tap to flip back', lang, backEx, backAudio)+'</div>' +
+      '</div></div>';
+    html += '<div class="learn-nav">' +
+      '<button id="btnPrev" '+(top.factIndex===0?'disabled style="opacity:0.4"':'')+'>‹ Prev</button>' +
+      '<button class="primary" id="btnNext">'+(top.factIndex===container.facts.length-1?'Finish':'Next ›')+'</button>' +
+      '</div></div>';
+    main.innerHTML = html;
+    wireSpeakButtons(main);
+
+    var flipped = false;
+    document.getElementById('flipCard').onclick = function(){
+      flipped = !flipped;
+      document.getElementById('flipInner').classList.toggle('flipped', flipped);
+    };
+    document.getElementById('btnPrev').onclick = function(){
+      if(top.factIndex>0) replaceTop(Object.assign({}, top, { factIndex: top.factIndex-1 }));
+    };
+    document.getElementById('btnNext').onclick = function(){
+      if(top.factIndex < container.facts.length-1) replaceTop(Object.assign({}, top, { factIndex: top.factIndex+1 }));
+      else pop();
+    };
+  }
+
+  // ---------- TEST ----------
+  function renderTest(topbar, main, top){
+    var t = topicById(top.topicId);
+    if(!t){ nav=[]; render(); return; }
+    var container = top.deckId ? deckById(t, top.deckId) : t;
+    if(!container){ pop(); return; }
+    if(top.idx >= top.queue.length){
+      replaceTop({view:'summary', topicId:t.id, deckId:top.deckId, correct:top.correct, missed:top.missed, total:top.queue.length});
+      return;
+    }
+    var f = container.facts.find(function(x){ return x.id===top.queue[top.idx]; });
+    var lang = container.lang || '';
+    var swapped = cardIsSwapped(container, f.id);
+    var label = top.deckId ? (esc(t.name)+' · '+esc(container.name)) : esc(t.name);
+    topbar.innerHTML =
+      '<button class="back" id="btnBack">‹</button>' +
+      '<div style="flex:1"><h1>Test · '+label+'</h1><div class="sub">Self-check mode</div></div>';
+    document.getElementById('btnBack').onclick = pop;
+
+    var frontText = swapped ? f.a : f.q, frontEx = swapped ? f.exampleTranslation : f.example, frontAudio = !swapped;
+    var backText = swapped ? f.q : f.a, backEx = swapped ? f.example : f.exampleTranslation, backAudio = swapped;
+    var html = '<div class="view stage">';
+    html += '<div class="progress-line"><span>CARD '+(top.idx+1)+' OF '+top.queue.length+'</span><span>BOX '+f.box+' OF 5</span></div>';
+    html += '<div class="flip-card" id="flipCard"><div class="flip-inner '+(top.revealed?'flipped':'')+'" id="flipInner">' +
+      '<div class="face front"><div class="kicker">'+(swapped?'Answer':'Question')+'</div>'+faceMarkup(frontText, (top.revealed?'':'tap reveal below'), lang, frontEx, frontAudio)+'</div>' +
+      '<div class="face back"><div class="kicker">'+(swapped?'Question':'Answer')+'</div>'+faceMarkup(backText, '', lang, backEx, backAudio)+'</div>' +
+      '</div></div>';
+    if(!top.revealed){
+      html += '<button class="reveal-btn" id="btnReveal">Reveal Answer</button>';
+    } else {
+      html += '<div class="grade-row"><button class="miss" id="btnMiss">Missed it</button><button class="got" id="btnGot">Got it</button></div>';
+    }
+    html += '</div>';
+    main.innerHTML = html;
+    wireSpeakButtons(main);
+
+    if(!top.revealed){
+      document.getElementById('btnReveal').onclick = function(){
+        replaceTop(Object.assign({}, top, {revealed:true}));
+      };
+    } else {
+      document.getElementById('btnGot').onclick = function(){ grade(f, top, true); };
+      document.getElementById('btnMiss').onclick = function(){ grade(f, top, false); };
+    }
+  }
+  function grade(fact, top, correct){
+    if(correct){
+      fact.box = Math.min(5, fact.box+1);
+      fact.nextReview = addDays(todayStr(), BOX_INTERVALS[fact.box-1]);
+    } else {
+      fact.box = 1;
+      fact.nextReview = addDays(todayStr(), BOX_INTERVALS[0]);
+    }
+    saveData();
+    replaceTop(Object.assign({}, top, {
+      idx: top.idx+1, revealed:false,
+      correct: top.correct + (correct?1:0),
+      missed: top.missed + (correct?0:1)
+    }));
+  }
+
+  // ---------- SUMMARY ----------
+  function renderSummary(topbar, main, top){
+    var t = topicById(top.topicId);
+    var d = (t && top.deckId) ? deckById(t, top.deckId) : null;
+    topbar.innerHTML = '<div style="flex:1"><h1>Session Complete</h1><div class="sub">'+esc(d?d.name:(t?t.name:''))+'</div></div>';
+    var pct = top.total>0 ? Math.round((top.correct/top.total)*100) : 0;
+    var unit = (t && (t.type||'facts')==='map') ? 'countries' : 'cards';
+    var html = '<div class="view summary">' +
+      '<div class="stamp-mark"><div class="n">'+pct+'%</div><div class="l">Recalled</div></div>' +
+      '<h2>'+top.correct+' of '+top.total+' '+unit+' correct</h2>' +
+      '<p>'+(top.missed>0 ? top.missed+' filed back into Box 1 for review.' : 'Everything moved up a box. Well filed.')+'</p>' +
+      '<button id="btnDone">Back to Drawer</button>' +
+      '</div>';
+    main.innerHTML = html;
+    document.getElementById('btnDone').onclick = function(){
+      nav = top.deckId ? [{view:'topic', topicId: top.topicId}, {view:'deck', topicId: top.topicId, deckId: top.deckId}] : [{view:'topic', topicId: top.topicId}];
+      render();
+    };
+  }
+
+  // ---------- init ----------
+  render();
+  loadData().then(function(){
+    render();
+    if(state.topics.some(function(t){ return (t.type||'facts')==='map'; })){
+      loadMapData().then(render);
+    }
+  });
+})();
+</script>
+</body>
+</html>
