@@ -365,7 +365,6 @@
 
 <script>
 (function(){
-  var STORAGE_KEY = 'app-data';
   var COLORS = ['#2E4034','#5B3A29','#3A4A5E','#5E3A4E','#3A4A2E'];
   var BOX_INTERVALS = [0,1,3,7,14]; // days, index = box-1
 
@@ -381,7 +380,15 @@
     d.setDate(d.getDate()+n);
     return d.toISOString().slice(0,10);
   }
-  function uid(){ return Math.random().toString(36).slice(2,10); }
+  // Real UUIDs now, not the old short base36 strings, since these become primary
+  // keys in Postgres uuid columns once Phase 1 (normalized tables) is live.
+  function uid(){
+    if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c){
+      var r = Math.random()*16|0, v = c==='x' ? r : (r&0x3|0x8);
+      return v.toString(16);
+    });
+  }
 
   function defaultData(){
     return { topics: [
@@ -432,14 +439,16 @@
     return CATEGORIES.concat((state.customCategories||[]).filter(function(c){ return CATEGORIES.indexOf(c)===-1; }));
   }
   function addCustomWordType(v){
-    if(!v) return;
+    if(!v) return false;
     if(!state.customWordTypes) state.customWordTypes = [];
-    if(wordTypeChoices().indexOf(v)===-1) state.customWordTypes.push(v);
+    if(wordTypeChoices().indexOf(v)===-1){ state.customWordTypes.push(v); return true; }
+    return false;
   }
   function addCustomCategory(v){
-    if(!v) return;
+    if(!v) return false;
     if(!state.customCategories) state.customCategories = [];
-    if(categoryChoices().indexOf(v)===-1) state.customCategories.push(v);
+    if(categoryChoices().indexOf(v)===-1){ state.customCategories.push(v); return true; }
+    return false;
   }
 
   var LANG_OPTIONS = [
@@ -476,27 +485,23 @@
     });
   }
 
-  // ---------- CLOUD STORAGE (Supabase) ----------
+  // ---------- CLOUD STORAGE (Supabase, normalized tables) ----------
   // 1. Create a free project at https://supabase.com
-  // 2. In the SQL editor, run:
-  //      create table catalog_data (
-  //        sync_id text primary key,
-  //        payload jsonb not null,
-  //        updated_at timestamptz default now()
-  //      );
-  //      alter table catalog_data enable row level security;
-  //      create policy "anon read/write" on catalog_data
-  //        for all using (true) with check (true);
-  // 3. Project Settings -> API -> copy the Project URL and the "anon public" key below.
-  // Note: the anon key is meant to be public (Supabase's row-level-security model relies on
-  // policies, not on hiding this key), but the open policy above means anyone who has your
-  // URL, key, AND sync code below could read/write this table. That's a reasonable trade-off
-  // for flashcard data, but don't reuse this pattern for anything sensitive.
-  var SUPABASE_URL = 'https://ogiieogwzzdieajhavut.supabase.co';
-  var SUPABASE_ANON_KEY = 'sb_publishable_Nfvtz7C-2A6FlF1HaK7LDA_MKyBOlAn';
-  var SUPABASE_TABLE = 'catalog_data';
+  // 2. In the SQL editor, run the full schema in setup-notes.sql (topics, decks,
+  //    facts, map_progress, custom_tags, RLS policies, grants, and the
+  //    facts_with_topic view for SQL practice).
+  // 3. Project Settings -> API (or API Keys) -> copy the Project URL and the
+  //    "Publishable key" (starts with sb_publishable_...) below. Older projects
+  //    may instead show an "anon public" key — that works the same way.
+  // Note: this key is meant to be public (Supabase's row-level-security model relies on
+  // policies, not on hiding this key), but the open policy means anyone who has your
+  // URL, key, AND sync code below could read/write these tables. That's a reasonable
+  // trade-off for flashcard data, but don't reuse this pattern for anything sensitive.
+  // Phase 2 (real login) will replace the sync code with actual per-account access control.
+  var SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+  var SUPABASE_ANON_KEY = 'YOUR-PUBLISHABLE-KEY';
   function supabaseReady(){
-    return SUPABASE_URL.indexOf('YOUR-PROJECT')===-1 && SUPABASE_ANON_KEY.indexOf('YOUR-ANON')===-1;
+    return SUPABASE_URL.indexOf('https://ogiieogwzzdieajhavut.supabase.co')===-1 && SUPABASE_ANON_KEY.indexOf('sb_publishable_Nfvtz7C-2A6FlF1HaK7LDA_MKyBOlAn')===-1;
   }
   var SYNC_ID_KEY = 'memory-catalog:sync-id';
   function makeSyncId(){ return uid()+'-'+uid()+'-'+uid(); }
@@ -508,68 +513,173 @@
     } catch(e){ return 'local'; }
   }
   function setSyncId(v){ try{ localStorage.setItem(SYNC_ID_KEY, v); } catch(e){} }
-  async function cloudGet(){
-    if(!supabaseReady()) return null;
-    var url = SUPABASE_URL+'/rest/v1/'+SUPABASE_TABLE+'?sync_id=eq.'+encodeURIComponent(getSyncId())+'&select=payload';
-    var res = await fetch(url, { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization':'Bearer '+SUPABASE_ANON_KEY } });
-    if(!res.ok) throw new Error('cloud read failed: '+res.status);
-    var rows = await res.json();
-    return (rows && rows.length) ? rows[0].payload : null;
+
+  // Thin REST wrappers around Supabase's auto-generated Data API (PostgREST).
+  // sbSelect throws on failure (loadData needs to know, to fall back to defaults).
+  // Everything else swallows its own errors and logs them, matching the old
+  // fire-and-forget save behavior: the UI updates immediately from local state,
+  // the database call happens in the background, and a failure is logged rather
+  // than surfaced with a blocking dialog. Known limitation, not an oversight:
+  // there's no offline queue or retry, so a write that fails while the network
+  // is down is genuinely lost. Fine for a personal app on a normally-working
+  // connection; worth knowing if you ever rely on this while offline.
+  function sbUrl(table){ return SUPABASE_URL + '/rest/v1/' + table; }
+  function sbHeaders(extra){
+    var h = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer '+SUPABASE_ANON_KEY, 'Content-Type':'application/json' };
+    if(extra) for(var k in extra) h[k] = extra[k];
+    return h;
   }
-  async function cloudSet(payload){
-    if(!supabaseReady()) return false;
-    var url = SUPABASE_URL+'/rest/v1/'+SUPABASE_TABLE+'?on_conflict=sync_id';
-    var res = await fetch(url, {
-      method:'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY, 'Authorization':'Bearer '+SUPABASE_ANON_KEY,
-        'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal'
-      },
-      body: JSON.stringify([{ sync_id:getSyncId(), payload:payload, updated_at:new Date().toISOString() }])
-    });
-    if(!res.ok) throw new Error('cloud write failed: '+res.status);
-    return true;
+  async function sbSelect(table, query){
+    var res = await fetch(sbUrl(table)+'?'+query, { headers: sbHeaders() });
+    if(!res.ok) throw new Error('select '+table+' failed: '+res.status);
+    return res.json();
+  }
+  async function sbInsert(table, rows){
+    try{
+      var res = await fetch(sbUrl(table), { method:'POST', headers: sbHeaders({'Prefer':'return=minimal'}), body: JSON.stringify(rows) });
+      if(!res.ok) throw new Error('status '+res.status);
+      return true;
+    } catch(e){ console.error('insert into '+table+' failed:', e); return false; }
+  }
+  async function sbUpdate(table, id, patch){
+    try{
+      var res = await fetch(sbUrl(table)+'?id=eq.'+encodeURIComponent(id), { method:'PATCH', headers: sbHeaders({'Prefer':'return=minimal'}), body: JSON.stringify(patch) });
+      if(!res.ok) throw new Error('status '+res.status);
+      return true;
+    } catch(e){ console.error('update '+table+' failed:', e); return false; }
+  }
+  async function sbDelete(table, id){
+    try{
+      var res = await fetch(sbUrl(table)+'?id=eq.'+encodeURIComponent(id), { method:'DELETE', headers: sbHeaders({'Prefer':'return=minimal'}) });
+      if(!res.ok) throw new Error('status '+res.status);
+      return true;
+    } catch(e){ console.error('delete from '+table+' failed:', e); return false; }
+  }
+  async function sbUpsert(table, rows, onConflict){
+    try{
+      var res = await fetch(sbUrl(table)+'?on_conflict='+onConflict, { method:'POST', headers: sbHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}), body: JSON.stringify(rows) });
+      if(!res.ok) throw new Error('status '+res.status);
+      return true;
+    } catch(e){ console.error('upsert into '+table+' failed:', e); return false; }
+  }
+  async function sbInsertIgnore(table, rows, onConflict){
+    try{
+      var res = await fetch(sbUrl(table)+'?on_conflict='+onConflict, { method:'POST', headers: sbHeaders({'Prefer':'resolution=ignore-duplicates,return=minimal'}), body: JSON.stringify(rows) });
+      if(!res.ok) throw new Error('status '+res.status);
+      return true;
+    } catch(e){ console.error('insert-ignore into '+table+' failed:', e); return false; }
   }
 
-  var storageShim = {
-    get: async function(){
-      try{
-        var cloud = await cloudGet();
-        if(cloud) return { value: JSON.stringify(cloud) };
-      } catch(e){ console.error('Supabase read failed, falling back to this browser\'s local copy:', e); }
-      try{
-        var raw = localStorage.getItem('memory-catalog:'+STORAGE_KEY);
-        return raw===null ? null : { value: raw };
-      } catch(e){ return null; }
-    },
-    set: async function(value){
-      try{ localStorage.setItem('memory-catalog:'+STORAGE_KEY, value); } catch(e){}
-      try{ await cloudSet(JSON.parse(value)); } catch(e){ console.error('Supabase write failed, kept in this browser only:', e); }
+  // ---- row <-> in-memory shape conversions ----
+  function topicToRow(t){
+    return { id:t.id, sync_id:getSyncId(), name:t.name, type:t.type||'facts', color:t.color||null,
+      lang:t.lang||null, card_order:t.cardOrder||'prompt', map_id:t.mapId||null,
+      last_category:t.lastCategory||null, include_territories: !!t.includeTerritories };
+  }
+  function deckToRow(d, topicId){
+    return { id:d.id, sync_id:getSyncId(), topic_id:topicId, name:d.name, lang:d.lang||null, card_order:d.cardOrder||'prompt' };
+  }
+  function factToRow(f, topicId, deckId){
+    return { id:f.id, sync_id:getSyncId(), topic_id:topicId||null, deck_id:deckId||null,
+      q:f.q, a:f.a, example:f.example||'', example_translation:f.exampleTranslation||'',
+      word_type:f.wordType||'', category:f.category||'', box:f.box, next_review:f.nextReview };
+  }
+  function deckFromRow(d){ return { id:d.id, name:d.name, lang:d.lang||'', cardOrder:d.card_order||'prompt' }; }
+  function factFromRow(f){
+    return { id:f.id, q:f.q, a:f.a, example:f.example||'', exampleTranslation:f.example_translation||'',
+      wordType:f.word_type||'', category:f.category||'', box:f.box, nextReview:f.next_review };
+  }
+  // A fact belongs to exactly one parent (a flat topic, or a deck within a topic).
+  // container.type is only ever set on topic objects, never on deck objects, so its
+  // presence is what distinguishes the two shapes everywhere a "container" is passed around.
+  function containerIds(container){
+    var isTopic = !!container.type;
+    return isTopic ? { topicId: container.id, deckId: null } : { topicId: null, deckId: container.id };
+  }
+
+  function reassembleState(topicsRows, decksRows, factsRows, mapRows, tagRows){
+    var decksByTopic = {};
+    decksRows.forEach(function(d){ (decksByTopic[d.topic_id] = decksByTopic[d.topic_id]||[]).push(deckFromRow(d)); });
+    var factsByDeck = {}, factsByTopic = {};
+    factsRows.forEach(function(f){
+      var obj = factFromRow(f);
+      if(f.deck_id) (factsByDeck[f.deck_id] = factsByDeck[f.deck_id]||[]).push(obj);
+      else (factsByTopic[f.topic_id] = factsByTopic[f.topic_id]||[]).push(obj);
+    });
+    var progressByTopic = {};
+    mapRows.forEach(function(p){
+      var m = progressByTopic[p.topic_id] = progressByTopic[p.topic_id]||{};
+      m[p.country_name] = { box:p.box, nextReview:p.next_review, seen:p.seen };
+    });
+    var customWordTypes = [], customCategories = [];
+    tagRows.forEach(function(r){
+      if(r.kind==='wordType') customWordTypes.push(r.value);
+      else if(r.kind==='category') customCategories.push(r.value);
+    });
+    var topics = topicsRows.map(function(t){
+      var topic = {
+        id:t.id, name:t.name, type:t.type||'facts', color:t.color, lang:t.lang||'',
+        cardOrder:t.card_order||'prompt', mapId:t.map_id,
+        lastCategory:t.last_category||null, includeTerritories: !!t.include_territories
+      };
+      if(topic.type==='map'){
+        topic.progress = progressByTopic[t.id] || {};
+      } else {
+        var decks = (decksByTopic[t.id]||[]).map(function(d){ d.facts = factsByDeck[d.id] || []; return d; });
+        if(decks.length){ topic.decks = decks; topic.facts = []; }
+        else { topic.facts = factsByTopic[t.id] || []; }
+      }
+      return topic;
+    });
+    return { topics: topics, customWordTypes: customWordTypes, customCategories: customCategories };
+  }
+
+  async function seedDefaultDataToCloud(data){
+    for(var ti=0; ti<data.topics.length; ti++){
+      var t = data.topics[ti];
+      await sbInsert('topics', [topicToRow(t)]);
+      if(t.type==='map') continue;
+      if(t.decks && t.decks.length){
+        for(var di=0; di<t.decks.length; di++){
+          var d = t.decks[di];
+          await sbInsert('decks', [deckToRow(d, t.id)]);
+          if(d.facts.length) await sbInsert('facts', d.facts.map(function(f){ return factToRow(f, null, d.id); }));
+        }
+      } else if(t.facts && t.facts.length){
+        await sbInsert('facts', t.facts.map(function(f){ return factToRow(f, t.id, null); }));
+      }
     }
-  };
+  }
 
   async function loadData(){
+    if(!supabaseReady()){
+      state = defaultData();
+      state.customWordTypes = []; state.customCategories = [];
+      state.loaded = true;
+      return;
+    }
     try{
-      var res = await storageShim.get();
-      if(res && res.value){
-        state = JSON.parse(res.value);
-      } else {
+      var qs = 'sync_id=eq.'+encodeURIComponent(getSyncId());
+      var results = await Promise.all([
+        sbSelect('topics', qs+'&order=created_at.asc'),
+        sbSelect('decks', qs+'&order=created_at.asc'),
+        sbSelect('facts', qs+'&order=created_at.asc'),
+        sbSelect('map_progress', qs),
+        sbSelect('custom_tags', qs)
+      ]);
+      if(results[0].length===0){
         state = defaultData();
-        await saveData();
+        state.customWordTypes = []; state.customCategories = [];
+        await seedDefaultDataToCloud(state);
+      } else {
+        state = reassembleState(results[0], results[1], results[2], results[3], results[4]);
       }
     } catch(e){
+      console.error('Supabase load failed, using unsaved defaults for this session:', e);
       state = defaultData();
-      try{ await saveData(); } catch(e2){}
+      state.customWordTypes = []; state.customCategories = [];
     }
-    if(!state.customWordTypes) state.customWordTypes = [];
-    if(!state.customCategories) state.customCategories = [];
     state.loaded = true;
-  }
-  async function saveData(){
-    try{
-      var copy = { topics: state.topics, customWordTypes: state.customWordTypes||[], customCategories: state.customCategories||[] };
-      await storageShim.set(JSON.stringify(copy));
-    } catch(e){ console.error('save failed', e); }
   }
 
   var MAP_CATEGORIES = ['World','Europe','Asia','Africa','North & Central America','Caribbean','South America','Oceania'];
@@ -620,11 +730,15 @@
     if(!topic.progress[name]) topic.progress[name] = { box:1, nextReview: todayStr(), seen:false };
     return topic.progress[name];
   }
+  function saveCountryProgress(topic, name){
+    var p = topic.progress[name];
+    sbUpsert('map_progress', [{ sync_id:getSyncId(), topic_id:topic.id, country_name:name, box:p.box, next_review:p.nextReview, seen: p.seen!==false }], 'topic_id,country_name');
+  }
   function gradeCountry(topic, name, correct){
     var p = ensureCountryProgress(topic, name);
     if(correct){ p.box = Math.min(5, p.box+1); p.nextReview = addDays(todayStr(), BOX_INTERVALS[p.box-1]); }
     else { p.box = 1; p.nextReview = addDays(todayStr(), BOX_INTERVALS[0]); }
-    saveData();
+    saveCountryProgress(topic, name);
   }
   function buildMapQueue(topic, category){
     var t = todayStr();
@@ -1398,7 +1512,7 @@
     var ready = supabaseReady();
     var statusHtml = ready
       ? '<p style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); line-height:1.5; margin:-6px 0 14px;">Connected to your Supabase project. To see this same data on another browser or device, open this page there and paste the sync code below into this same box.</p>'
-      : '<p style="font-family:var(--font-mono); font-size:11px; color:var(--stamp); line-height:1.5; margin:-6px 0 14px;">No database connected yet, so data is only saved in this browser. Add your Supabase project URL and anon key near the top of index.html to turn on cross-device sync (see comments in the code).</p>';
+      : '<p style="font-family:var(--font-mono); font-size:11px; color:var(--stamp); line-height:1.5; margin:-6px 0 14px;">No database connected. Changes won\'t be saved anywhere once you close or refresh this page. Add your Supabase project URL and publishable key near the top of index.html to turn on saving and cross-device sync (see comments in the code).</p>';
     wrap.innerHTML =
       '<div class="sheet">' +
       '<h3>Sync Settings</h3>' +
@@ -1498,8 +1612,9 @@
     wrap.querySelector('#tCancel').onclick = function(){ wrap.remove(); };
     if(t){
       wrap.querySelector('#tDelete').onclick = function(){
+        var deletedId = t.id;
         state.topics = state.topics.filter(function(x){ return x.id!==t.id; });
-        saveData();
+        sbDelete('topics', deletedId);
         wrap.remove();
         nav = [];
         render();
@@ -1512,15 +1627,19 @@
       if(t){
         t.name = name; t.color = chosen;
         if(!isMapTopic){ t.lang = langEl?langEl.value:''; t.cardOrder = orderEl?orderEl.value:'prompt'; }
+        sbUpdate('topics', t.id, { name:t.name, color:t.color, lang:t.lang||null, card_order:t.cardOrder||'prompt' });
       }
       else if(chosenType==='map'){
-        state.topics.push({ id: uid(), name:name, type:'map', mapId:'world', color:chosen, progress:{} });
+        var newMapTopic = { id: uid(), name:name, type:'map', mapId:'world', color:chosen, progress:{} };
+        state.topics.push(newMapTopic);
+        sbInsert('topics', [topicToRow(newMapTopic)]);
         loadMapData().then(render);
       }
       else {
-        state.topics.push({ id: uid(), name:name, type:'facts', color:chosen, lang: langEl?langEl.value:'', cardOrder: orderEl?orderEl.value:'prompt', facts:[] });
+        var newTopic = { id: uid(), name:name, type:'facts', color:chosen, lang: langEl?langEl.value:'', cardOrder: orderEl?orderEl.value:'prompt', facts:[] };
+        state.topics.push(newTopic);
+        sbInsert('topics', [topicToRow(newTopic)]);
       }
-      saveData();
       wrap.remove();
       render();
     };
@@ -1641,8 +1760,10 @@
     wrap.querySelector('#dCancel').onclick = function(){ wrap.remove(); };
     if(d){
       wrap.querySelector('#dDelete').onclick = function(){
+        var deletedId = d.id;
         t.decks = t.decks.filter(function(x){ return x.id!==d.id; });
-        saveData(); wrap.remove();
+        sbDelete('decks', deletedId);
+        wrap.remove();
         nav = nav.filter(function(n){ return n.deckId !== d.id; });
         render();
       };
@@ -1652,15 +1773,30 @@
       var lang = wrap.querySelector('#dLang').value;
       var cardOrder = wrap.querySelector('#dOrder').value;
       if(!name) return;
-      if(d){ d.name = name; d.lang = lang; d.cardOrder = cardOrder; }
-      else {
+      if(d){
+        d.name = name; d.lang = lang; d.cardOrder = cardOrder;
+        sbUpdate('decks', d.id, { name:name, lang:lang||null, card_order:cardOrder });
+      } else {
         if(!t.decks){
           t.decks = [];
-          if(t.facts && t.facts.length){ t.decks.push({ id: uid(), name:'General', lang:'', cardOrder:'prompt', facts:t.facts }); t.facts = []; }
+          if(t.facts && t.facts.length){
+            var generalDeck = { id: uid(), name:'General', lang:'', cardOrder:'prompt', facts:t.facts };
+            var movedFacts = t.facts;
+            t.decks.push(generalDeck);
+            t.facts = [];
+            // The General deck row must exist before we can re-point the moved
+            // facts' deck_id at it (foreign key), so this insert has to resolve
+            // first; the fact updates are then fired off in parallel.
+            sbInsert('decks', [deckToRow(generalDeck, t.id)]).then(function(){
+              movedFacts.forEach(function(f){ sbUpdate('facts', f.id, { topic_id:null, deck_id: generalDeck.id }); });
+            });
+          }
         }
-        t.decks.push({ id: uid(), name:name, lang:lang, cardOrder:cardOrder, facts:[] });
+        var newDeck = { id: uid(), name:name, lang:lang, cardOrder:cardOrder, facts:[] };
+        t.decks.push(newDeck);
+        sbInsert('decks', [deckToRow(newDeck, t.id)]);
       }
-      saveData(); wrap.remove(); render();
+      wrap.remove(); render();
     };
   }
 
@@ -1875,11 +2011,11 @@
     main.innerHTML = html;
 
     main.querySelectorAll('.cat-chip').forEach(function(el){
-      el.onclick = function(){ t.lastCategory = el.getAttribute('data-cat'); saveData(); render(); };
+      el.onclick = function(){ t.lastCategory = el.getAttribute('data-cat'); sbUpdate('topics', t.id, { last_category: t.lastCategory }); render(); };
     });
     var toggleBtn = document.getElementById('btnTerritoryToggle');
     if(toggleBtn){
-      toggleBtn.onclick = function(){ t.includeTerritories = !t.includeTerritories; saveData(); render(); };
+      toggleBtn.onclick = function(){ t.includeTerritories = !t.includeTerritories; sbUpdate('topics', t.id, { include_territories: t.includeTerritories }); render(); };
     }
     document.getElementById('btnExplore').onclick = function(){
       push({view:'mapexplore', topicId:t.id, category:category});
@@ -1945,8 +2081,9 @@
       var name = pathEl.getAttribute('data-name');
       var isTerritory = pathEl.getAttribute('data-territory')==='1';
       var parent = pathEl.getAttribute('data-parent');
+      var alreadySeen = !!(t.progress && t.progress[name]);
       ensureCountryProgress(t, name);
-      saveData();
+      if(!alreadySeen) saveCountryProgress(t, name);
       document.getElementById('banterName').textContent = name + (isTerritory && parent ? ' — territory of ' + parent : '');
       var p = t.progress[name];
       document.getElementById('banterCode').textContent = 'BOX ' + p.box + ' OF 5';
@@ -2144,12 +2281,18 @@
       var lines = textarea.value.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
       var parsed = lines.map(parseVocabLine).filter(Boolean);
       if(parsed.length===0) return;
+      var ids = containerIds(container);
+      var newFactRows = [], newTagRows = [];
       parsed.forEach(function(r){
-        if(r.wordType) addCustomWordType(r.wordType);
-        if(r.category) addCustomCategory(r.category);
-        container.facts.push(mkFact(r.q, r.a, r.example, r.exampleTranslation, r.wordType, r.category));
+        if(r.wordType && addCustomWordType(r.wordType)) newTagRows.push({sync_id:getSyncId(), kind:'wordType', value:r.wordType});
+        if(r.category && addCustomCategory(r.category)) newTagRows.push({sync_id:getSyncId(), kind:'category', value:r.category});
+        var f = mkFact(r.q, r.a, r.example, r.exampleTranslation, r.wordType, r.category);
+        container.facts.push(f);
+        newFactRows.push(factToRow(f, ids.topicId, ids.deckId));
       });
-      saveData(); wrap.remove(); render();
+      sbInsert('facts', newFactRows);
+      if(newTagRows.length) sbInsertIgnore('custom_tags', newTagRows, 'sync_id,kind,value');
+      wrap.remove(); render();
     };
   }
 
@@ -2204,8 +2347,9 @@
     wrap.querySelector('#fCancel').onclick = function(){ wrap.remove(); };
     if(f){
       wrap.querySelector('#fDelete').onclick = function(){
+        var deletedId = f.id;
         container.facts = container.facts.filter(function(x){ return x.id!==f.id; });
-        saveData(); wrap.remove(); render();
+        sbDelete('facts', deletedId); wrap.remove(); render();
       };
     }
     wrap.querySelector('#fSave').onclick = function(){
@@ -2216,11 +2360,20 @@
       if(!q || !a) return;
       var wordType = langName ? tagFieldValue(wrap, 'fWordType') : '';
       var category = langName ? tagFieldValue(wrap, 'fCategory') : '';
-      if(wordType) addCustomWordType(wordType);
-      if(category) addCustomCategory(category);
-      if(f){ f.q=q; f.a=a; f.example=ex; f.exampleTranslation=exT; f.wordType=wordType; f.category=category; }
-      else { container.facts.push(mkFact(q,a,ex,exT,wordType,category)); }
-      saveData(); wrap.remove(); render();
+      var newTagRows = [];
+      if(wordType && addCustomWordType(wordType)) newTagRows.push({sync_id:getSyncId(), kind:'wordType', value:wordType});
+      if(category && addCustomCategory(category)) newTagRows.push({sync_id:getSyncId(), kind:'category', value:category});
+      if(newTagRows.length) sbInsertIgnore('custom_tags', newTagRows, 'sync_id,kind,value');
+      if(f){
+        f.q=q; f.a=a; f.example=ex; f.exampleTranslation=exT; f.wordType=wordType; f.category=category;
+        sbUpdate('facts', f.id, { q:q, a:a, example:ex, example_translation:exT, word_type:wordType, category:category });
+      } else {
+        var newFact = mkFact(q,a,ex,exT,wordType,category);
+        container.facts.push(newFact);
+        var ids = containerIds(container);
+        sbInsert('facts', [factToRow(newFact, ids.topicId, ids.deckId)]);
+      }
+      wrap.remove(); render();
     };
   }
 
@@ -2372,7 +2525,7 @@
       fact.box = 1;
       fact.nextReview = addDays(todayStr(), BOX_INTERVALS[0]);
     }
-    saveData();
+    sbUpdate('facts', fact.id, { box: fact.box, next_review: fact.nextReview });
     replaceTop(Object.assign({}, top, {
       idx: top.idx+1, revealed:false,
       correct: top.correct + (correct?1:0),
