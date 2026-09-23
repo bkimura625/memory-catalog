@@ -154,10 +154,12 @@
   .streak-line.heat-1{ color:#B8862F; }
   .streak-line.heat-2{ color:#C96A1E; }
   .streak-line.heat-3{ color:#D94A17; }
-  .streak-line.heat-4{ color:#E8380F; animation:fireTextPulse 1.1s ease-in-out infinite; }
+  .streak-line.heat-4{ color:#E8380F; animation:fireTextPulse 0.5s ease-in-out infinite; }
   @keyframes fireTextPulse{
-    0%,100%{ transform:scale(1); }
-    50%{ transform:scale(1.08); }
+    0%,100%{ transform:scale(1) rotate(0deg); color:#E8380F; }
+    25%{ transform:scale(1.16) rotate(-3deg); color:#FF6A1A; }
+    50%{ transform:scale(1.24) rotate(3deg); color:#FF2D0F; }
+    75%{ transform:scale(1.14) rotate(-2deg); color:#FF6A1A; }
   }
   .flip-card{
     width:100%; max-width:420px; aspect-ratio:4/5; perspective:1200px; margin-bottom:20px;
@@ -167,12 +169,13 @@
   .flip-card.heat-2{ box-shadow:0 0 0 2px rgba(217,123,41,0.45), 0 6px 22px rgba(217,123,41,0.32); }
   .flip-card.heat-3{ box-shadow:0 0 0 2.5px rgba(226,87,31,0.55), 0 8px 26px rgba(226,87,31,0.4); }
   .flip-card.heat-4{
-    box-shadow:0 0 0 3px rgba(255,59,31,0.7), 0 10px 32px rgba(255,90,26,0.55);
-    animation:fireGlow 1.1s ease-in-out infinite;
+    animation:fireGlow 0.55s ease-in-out infinite;
   }
   @keyframes fireGlow{
-    0%,100%{ box-shadow:0 0 0 3px rgba(255,59,31,0.7), 0 10px 32px rgba(255,90,26,0.55); }
-    50%{ box-shadow:0 0 0 4px rgba(255,90,26,0.85), 0 12px 40px rgba(255,59,31,0.7); }
+    0%{ box-shadow:0 0 0 3px rgba(255,59,31,0.75), 0 0 20px 4px rgba(255,90,26,0.55), 0 10px 32px rgba(255,90,26,0.5); transform:scale(1); }
+    30%{ box-shadow:0 0 0 6px rgba(255,150,20,0.95), 0 0 46px 16px rgba(255,110,20,0.9), 0 16px 46px rgba(255,60,15,0.7); transform:scale(1.018); }
+    60%{ box-shadow:0 0 0 7px rgba(255,40,10,1), 0 0 58px 20px rgba(255,80,10,0.95), 0 18px 54px rgba(255,25,10,0.8); transform:scale(1.025); }
+    100%{ box-shadow:0 0 0 3px rgba(255,59,31,0.75), 0 0 20px 4px rgba(255,90,26,0.55), 0 10px 32px rgba(255,90,26,0.5); transform:scale(1); }
   }
   .flip-inner{
     position:relative; width:100%; height:100%; transition:transform 0.5s cubic-bezier(.4,.2,.2,1);
