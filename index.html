@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --paper:#F1ECDC;
@@ -2217,73 +2218,183 @@
     }
   }
 
-  function parseVocabLine(line){
-    var parts;
-    if(line.indexOf('\t')!==-1) parts = line.split('\t');
-    else if(line.indexOf(',')!==-1) parts = splitCSVLine(line);
-    else if(line.indexOf(' - ')!==-1) parts = line.split(' - ');
-    else if(line.indexOf(';')!==-1) parts = line.split(';');
-    else return null;
-    parts = parts.map(function(p){ return p.trim().replace(/^"(.*)"$/,'$1').trim(); });
-    if(!parts[0] || !parts[1]) return null;
-    return { q: parts[0], a: parts[1], example: parts[2]||'', exampleTranslation: parts[3]||'', wordType: parts[4]||'', category: parts[5]||'' };
-  }
-  function splitCSVLine(line){
-    var result = [], cur = '', inQuotes = false;
-    for(var i=0;i<line.length;i++){
-      var ch = line[i];
-      if(ch==='"'){ inQuotes = !inQuotes; }
-      else if(ch===',' && !inQuotes){ result.push(cur); cur=''; }
-      else cur += ch;
+  // ---------- BULK IMPORT: strict, delimiter-safe parsing ----------
+  // Three input paths, each unambiguous by construction:
+  //  - .xlsx: real spreadsheet cells, no delimiter to guess at all.
+  //  - .csv: RFC4180 comma-delimited with proper quote handling, parsed over the
+  //    whole file (not line-by-line first), so a quoted field can safely contain
+  //    commas or even embedded newlines.
+  //  - pasted text: treated strictly as tab-separated (what a spreadsheet actually
+  //    puts on the clipboard when you copy a range of cells), never comma-guessed.
+  // Column order is always: Word, Translation, Example, Example Translation,
+  // Word Type, Topic. Row 1 is always treated as a header and skipped.
+  function parseCSVText(text){
+    if(text.charCodeAt(0)===0xFEFF) text = text.slice(1); // strip a UTF-8 BOM if present
+    var rows = [], row = [], field = '', inQuotes = false, i = 0, len = text.length;
+    while(i < len){
+      var ch = text[i];
+      if(inQuotes){
+        if(ch === '"'){
+          if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      } else {
+        if(ch === '"'){ inQuotes = true; i++; continue; }
+        if(ch === ','){ row.push(field); field=''; i++; continue; }
+        if(ch === '\r'){ i++; continue; }
+        if(ch === '\n'){ row.push(field); rows.push(row); row=[]; field=''; i++; continue; }
+        field += ch; i++; continue;
+      }
     }
-    result.push(cur);
-    return result;
+    if(field.length || row.length){ row.push(field); rows.push(row); }
+    return rows;
   }
+  function parseTSVText(text){
+    return text.split(/\r?\n/).map(function(line){ return line.split('\t'); });
+  }
+  function parseXLSXBuffer(buffer){
+    var workbook = XLSX.read(buffer, {type:'array'});
+    var sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', blankrows:false});
+  }
+  function rowsToEntries(rows){
+    var dataRows = rows.slice(1); // row 1 is always a header, always skipped
+    return dataRows
+      .filter(function(cols){ return cols.some(function(c){ return String(c||'').trim()!==''; }); })
+      .map(function(cols, i){
+        var get = function(idx){ return (cols[idx]===undefined || cols[idx]===null) ? '' : String(cols[idx]).trim(); };
+        var q = get(0), a = get(1);
+        return {
+          rowNum: i+2,
+          q:q, a:a, example:get(2), exampleTranslation:get(3), wordType:get(4), category:get(5),
+          ok: !!(q && a),
+          reason: !q ? 'missing word' : (!a ? 'missing translation' : '')
+        };
+      });
+  }
+
   function openBulkImportSheet(container){
-    var langName = langNameForCode(container.lang);
-    var helpText = langName
-      ? 'One entry per line: <b>word, translation</b>, optionally followed by <b>example sentence, example translation, word type, topic</b> (leave a column blank to skip it, e.g. <code>Hund, dog, , , Noun, Animals</code>). Works with commas, tabs, semicolons, or " - ". Paste text below, or upload a .csv/.txt file.'
-      : 'One entry per line: <b>question, answer</b> or <b>question, answer, example, example translation</b>. Works with commas, tabs, semicolons, or " - ". Paste text below, or upload a .csv/.txt file.';
     var wrap = document.createElement('div');
     wrap.className = 'overlay';
+    var helpText = 'Column order, always: <b>Word, Translation, Example, Example Translation, Word Type, Topic</b>. ' +
+      'Row 1 is treated as a header and skipped. Upload a <b>.xlsx</b> file (recommended, no formatting to worry about) ' +
+      'or a proper <b>.csv</b> export from Excel/Sheets (fields with commas get auto-quoted by those programs, so you never ' +
+      'type the quotes yourself). Or copy a range of cells from a spreadsheet and paste them below.';
     wrap.innerHTML =
       '<div class="sheet">' +
-      '<h3>Bulk Import'+(langName?' Vocabulary':'')+'</h3>' +
+      '<h3>Bulk Import</h3>' +
       '<p style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); line-height:1.5; margin:-6px 0 14px;">'+helpText+'</p>' +
-      '<div class="field"><label>Upload file</label><input id="bFile" type="file" accept=".csv,.txt,text/csv,text/plain"></div>' +
-      '<div class="field"><label>Or paste text</label><textarea id="bText" style="min-height:140px;" placeholder="Hund, dog, Der Hund läuft schnell., The dog runs fast., Noun, Animals\nKatze, cat"></textarea></div>' +
-      '<div id="bPreview" style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); margin-bottom:10px;"></div>' +
+      '<div class="field"><label>Upload .csv or .xlsx file</label><input id="bFile" type="file" accept=".csv,.xlsx"></div>' +
+      '<div class="field"><label>Or paste cells copied from a spreadsheet</label><textarea id="bText" style="min-height:100px;" placeholder="Paste copied spreadsheet cells here (tab-separated)"></textarea></div>' +
+      '<div id="bError" style="font-family:var(--font-mono); font-size:11px; color:#b3492c; margin-bottom:8px;"></div>' +
+      '<div id="bSummary" style="font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); margin-bottom:8px;"></div>' +
+      '<div id="bPreviewWrap" style="max-height:260px; overflow:auto; border:1px solid var(--paper-dark); border-radius:8px; margin-bottom:14px;"></div>' +
       '<div class="sheet-actions">' +
       '<button class="cancel" id="bCancel">Cancel</button>' +
-      '<button class="save" id="bImport">Import</button>' +
+      '<button class="save" id="bImport" disabled>Import</button>' +
       '</div></div>';
     document.body.appendChild(wrap);
     var textarea = wrap.querySelector('#bText');
-    var preview = wrap.querySelector('#bPreview');
-    function updatePreview(){
-      var lines = textarea.value.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
-      var parsed = lines.map(parseVocabLine).filter(Boolean);
-      preview.textContent = lines.length ? (parsed.length + ' of ' + lines.length + ' lines recognized') : '';
+    var errorEl = wrap.querySelector('#bError');
+    var summaryEl = wrap.querySelector('#bSummary');
+    var previewWrap = wrap.querySelector('#bPreviewWrap');
+    var importBtn = wrap.querySelector('#bImport');
+    var currentEntries = [];
+
+    function esc2(s){ return esc(String(s||'')); }
+    function renderPreview(entries){
+      currentEntries = entries;
+      errorEl.textContent = '';
+      var valid = entries.filter(function(e){ return e.ok; });
+      var invalid = entries.filter(function(e){ return !e.ok; });
+      if(entries.length===0){
+        summaryEl.textContent = '';
+        previewWrap.innerHTML = '';
+        importBtn.disabled = true;
+        return;
+      }
+      summaryEl.textContent = valid.length + ' ready to import' + (invalid.length ? ', ' + invalid.length + ' skipped (missing word or translation)' : '');
+      var shown = entries.slice(0, 40);
+      var wtChoices = wordTypeChoices(), catChoices = categoryChoices();
+      var html = '<table style="width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:10.5px;">' +
+        '<thead><tr style="background:var(--paper-dark);">' +
+        ['Word','Translation','Example','Ex. Translation','Word Type','Topic'].map(function(h){
+          return '<th style="text-align:left; padding:6px 8px; white-space:nowrap;">'+h+'</th>';
+        }).join('') + '</tr></thead><tbody>';
+      shown.forEach(function(e){
+        var rowStyle = e.ok ? '' : 'opacity:0.55;';
+        html += '<tr style="border-top:1px solid var(--paper-dark); '+rowStyle+'">';
+        if(!e.ok){
+          html += '<td style="padding:6px 8px; color:#b3492c;" colspan="6">Row '+e.rowNum+' skipped: '+esc2(e.reason)+'</td>';
+        } else {
+          [e.q, e.a, e.example, e.exampleTranslation].forEach(function(v){
+            html += '<td style="padding:6px 8px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">'+esc2(v)+'</td>';
+          });
+          [{v:e.wordType, list:wtChoices}, {v:e.category, list:catChoices}].forEach(function(f){
+            var isNew = f.v && f.list.indexOf(f.v)===-1;
+            html += '<td style="padding:6px 8px; white-space:nowrap;">'+esc2(f.v)+(isNew?' <span style="color:var(--stamp);">(new)</span>':'')+'</td>';
+          });
+        }
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      if(entries.length > shown.length){
+        html += '<div style="padding:6px 8px; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft);">+ '+(entries.length-shown.length)+' more row'+(entries.length-shown.length===1?'':'s')+' not shown, will still be imported</div>';
+      }
+      previewWrap.innerHTML = html;
+      importBtn.disabled = valid.length===0;
     }
-    textarea.addEventListener('input', updatePreview);
+
+    textarea.addEventListener('input', function(){
+      wrap.querySelector('#bFile').value = '';
+      var text = textarea.value;
+      if(!text.trim()){ renderPreview([]); return; }
+      renderPreview(rowsToEntries(parseTSVText(text)));
+    });
+
     wrap.querySelector('#bFile').addEventListener('change', function(e){
       var file = e.target.files[0];
       if(!file) return;
+      textarea.value = '';
+      var isXlsx = /\.xlsx$/i.test(file.name);
+      var isCsv = /\.csv$/i.test(file.name);
+      if(!isXlsx && !isCsv){
+        errorEl.textContent = 'Only .csv and .xlsx files are supported.';
+        summaryEl.textContent = '';
+        previewWrap.innerHTML = '';
+        importBtn.disabled = true;
+        currentEntries = [];
+        return;
+      }
       var reader = new FileReader();
-      reader.onload = function(){
-        textarea.value = String(reader.result||'');
-        updatePreview();
-      };
-      reader.readAsText(file);
+      reader.onerror = function(){ errorEl.textContent = 'Could not read that file.'; };
+      if(isXlsx){
+        reader.onload = function(){
+          try{
+            var rows = parseXLSXBuffer(new Uint8Array(reader.result));
+            renderPreview(rowsToEntries(rows));
+          } catch(err){ errorEl.textContent = 'Could not read that spreadsheet: ' + err.message; }
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        reader.onload = function(){
+          try{
+            var rows = parseCSVText(String(reader.result||''));
+            renderPreview(rowsToEntries(rows));
+          } catch(err){ errorEl.textContent = 'Could not parse that CSV: ' + err.message; }
+        };
+        reader.readAsText(file);
+      }
     });
+
     wrap.querySelector('#bCancel').onclick = function(){ wrap.remove(); };
     wrap.querySelector('#bImport').onclick = function(){
-      var lines = textarea.value.split(/\r?\n/).map(function(l){ return l.trim(); }).filter(Boolean);
-      var parsed = lines.map(parseVocabLine).filter(Boolean);
-      if(parsed.length===0) return;
+      var valid = currentEntries.filter(function(e){ return e.ok; });
+      if(valid.length===0) return;
       var ids = containerIds(container);
       var newFactRows = [], newTagRows = [];
-      parsed.forEach(function(r){
+      valid.forEach(function(r){
         if(r.wordType && addCustomWordType(r.wordType)) newTagRows.push({sync_id:getSyncId(), kind:'wordType', value:r.wordType});
         if(r.category && addCustomCategory(r.category)) newTagRows.push({sync_id:getSyncId(), kind:'category', value:r.category});
         var f = mkFact(r.q, r.a, r.example, r.exampleTranslation, r.wordType, r.category);
